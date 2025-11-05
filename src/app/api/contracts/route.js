@@ -86,7 +86,7 @@ export async function GET(request) {
       );
     }
 
-    // For each contract, fetch payment schedules and calculate statistics
+    // For each contract, fetch payment schedules, transfer history, and calculate statistics
     const contractsWithDetails = await Promise.all(
       contracts.map(async (contract) => {
         // Fetch payment schedules
@@ -102,6 +102,16 @@ export async function GET(request) {
             schedulesError
           );
         }
+
+        // Fetch transfer history (most recent transfer)
+        const { data: transfers } = await supabaseAdmin
+          .from("contract_transfer_history")
+          .select("*")
+          .eq("contract_id", contract.contract_id)
+          .order("transferred_at", { ascending: false })
+          .limit(1);
+
+        const transferHistory = transfers && transfers.length > 0 ? transfers[0] : null;
 
         // Calculate statistics
         const paidCount =
@@ -129,6 +139,7 @@ export async function GET(request) {
         return {
           ...contract,
           payment_schedules: schedules || [],
+          transfer_history: transferHistory,
           statistics: {
             total_installments: schedules?.length || 0,
             paid_installments: paidCount,

@@ -26,9 +26,15 @@ import {
   Clock,
   XCircle,
   Search,
+  Download,
+  Printer,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { format } from "date-fns";
+import {
+  generateTransactionReceipt,
+  generateDateRangeReceipt,
+} from "@/lib/receipt-generator";
 
 export default function Transactions() {
   const [transactions, setTransactions] = useState([]);
@@ -174,6 +180,93 @@ export default function Transactions() {
     setSearchTerm("");
   };
 
+  // Generate individual receipt
+  const handleGenerateReceipt = async (transactionId, action = "download") => {
+    try {
+      toast.info("Generating receipt...");
+
+      const response = await fetch(
+        `/api/transactions/receipt?transaction_id=${transactionId}`
+      );
+      const result = await response.json();
+
+      if (!result.success) {
+        toast.error(result.error || "Failed to generate receipt");
+        return;
+      }
+
+      // Generate PDF
+      const doc = generateTransactionReceipt(result.data);
+
+      if (action === "print") {
+        // Open print dialog
+        doc.autoPrint();
+        window.open(doc.output("bloburl"), "_blank");
+        toast.success("Opening print dialog...");
+      } else {
+        // Download PDF
+        doc.save(`receipt-${transactionId}.pdf`);
+        toast.success("Receipt downloaded successfully!");
+      }
+    } catch (error) {
+      console.error("Error generating receipt:", error);
+      toast.error("Failed to generate receipt");
+    }
+  };
+
+  // Generate date range receipt
+  const handleGenerateDateRangeReceipt = async (action = "download") => {
+    try {
+      if (!startDate && !endDate) {
+        toast.error("Please select a date range first");
+        return;
+      }
+
+      toast.info("Generating summary receipt...");
+
+      const params = new URLSearchParams();
+      if (startDate) params.append("start_date", startDate);
+      if (endDate) params.append("end_date", endDate);
+
+      const response = await fetch(`/api/transactions/receipt?${params}`);
+      const result = await response.json();
+
+      if (!result.success) {
+        toast.error(result.error || "Failed to generate receipt");
+        return;
+      }
+
+      if (result.data.length === 0) {
+        toast.error("No transactions found in the selected date range");
+        return;
+      }
+
+      // Generate PDF
+      const doc = generateDateRangeReceipt(
+        result.data,
+        result.startDate,
+        result.endDate
+      );
+
+      if (action === "print") {
+        // Open print dialog
+        doc.autoPrint();
+        window.open(doc.output("bloburl"), "_blank");
+        toast.success("Opening print dialog...");
+      } else {
+        // Download PDF
+        const filename = `transaction-summary-${startDate || "start"}-to-${
+          endDate || "end"
+        }.pdf`;
+        doc.save(filename);
+        toast.success("Summary receipt downloaded successfully!");
+      }
+    } catch (error) {
+      console.error("Error generating date range receipt:", error);
+      toast.error("Failed to generate summary receipt");
+    }
+  };
+
   const getStatusColor = (status) => {
     switch (status) {
       case "completed":
@@ -240,12 +333,26 @@ export default function Transactions() {
               Monitor and manage all payment transactions
             </p>
           </div>
-          <Button
-            onClick={loadData}
-            className="bg-gradient-to-r from-red-500 to-red-600 text-white shadow-lg hover:shadow-xl transition-all"
-          >
-            <RefreshCw className="w-5 h-5 mr-2" /> Refresh
-          </Button>
+          <div className="flex gap-3">
+            <Button
+              onClick={() => handleGenerateDateRangeReceipt("print")}
+              className="bg-gradient-to-r from-purple-500 to-purple-600 text-white shadow-lg hover:shadow-xl transition-all"
+            >
+              <Printer className="w-5 h-5 mr-2" /> Print Receipt
+            </Button>
+            <Button
+              onClick={() => handleGenerateDateRangeReceipt("download")}
+              className="bg-gradient-to-r from-green-500 to-green-600 text-white shadow-lg hover:shadow-xl transition-all"
+            >
+              <Download className="w-5 h-5 mr-2" /> Download Receipt
+            </Button>
+            <Button
+              onClick={loadData}
+              className="bg-gradient-to-r from-red-500 to-red-600 text-white shadow-lg hover:shadow-xl transition-all"
+            >
+              <RefreshCw className="w-5 h-5 mr-2" /> Refresh
+            </Button>
+          </div>
         </motion.div>
 
         {/* Summary Cards */}
@@ -534,6 +641,9 @@ export default function Transactions() {
                         <th className="px-6 py-4 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">
                           Status
                         </th>
+                        <th className="px-6 py-4 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">
+                          Actions
+                        </th>
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-slate-200">
@@ -609,6 +719,36 @@ export default function Transactions() {
                               {getStatusIcon(transaction.payment_status)}
                               {transaction.payment_status || "N/A"}
                             </Badge>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="flex gap-2">
+                              <Button
+                                size="sm"
+                                onClick={() =>
+                                  handleGenerateReceipt(
+                                    transaction.transaction_id,
+                                    "print"
+                                  )
+                                }
+                                className="bg-purple-500 hover:bg-purple-600 text-white"
+                                title="Print Receipt"
+                              >
+                                <Printer className="w-4 h-4" />
+                              </Button>
+                              <Button
+                                size="sm"
+                                onClick={() =>
+                                  handleGenerateReceipt(
+                                    transaction.transaction_id,
+                                    "download"
+                                  )
+                                }
+                                className="bg-green-500 hover:bg-green-600 text-white"
+                                title="Download Receipt"
+                              >
+                                <Download className="w-4 h-4" />
+                              </Button>
+                            </div>
                           </td>
                         </motion.tr>
                       ))}

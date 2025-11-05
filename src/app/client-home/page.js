@@ -36,6 +36,7 @@ import { createClient } from "@supabase/supabase-js";
 import { toast } from "react-toastify";
 import { useClientAuth } from "@/contexts/ClientAuthContext";
 import Link from "next/link";
+import RealNotificationBell from '@/components/ui/RealNotificationBell';
 
 // Initialize Supabase client
 const supabase = createClient(
@@ -615,6 +616,12 @@ export default function ClientLandingPage() {
               >
                 Contact
               </a>
+              {isAuthenticated && (
+                <>
+                  {/* Notification Bell */}
+                  <RealNotificationBell />
+                </>
+              )}
               {isAuthenticated ? (
                 <div className="relative">
                   <button
@@ -678,9 +685,13 @@ export default function ClientLandingPage() {
                 </Link>
               )}
             </div>
-            <button className="md:hidden">
-              <Menu className="h-6 w-6 text-slate-600" />
-            </button>
+            <div className="md:hidden flex items-center gap-3">
+              {/* Mobile Notification Bell */}
+              {isAuthenticated && <RealNotificationBell />}
+              <button>
+                <Menu className="h-6 w-6 text-slate-600" />
+              </button>
+            </div>
           </div>
         </div>
       </nav>

@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
+import { createNotification, NotificationTemplates } from "@/lib/notification-helper";
 
 // Function to create Supabase admin client safely
 function createSupabaseAdmin() {
@@ -86,6 +87,21 @@ export async function POST(request) {
     console.log(
       "✅ Appointment created successfully:",
       appointment.appointment_id
+    );
+
+    // Create notification for new tour booking
+    await createNotification(
+      supabaseAdmin,
+      NotificationTemplates.TOUR_BOOKED({
+        appointmentId: appointment.appointment_id,
+        clientName: bookingData.client_name,
+        clientEmail: bookingData.client_email,
+        clientPhone: bookingData.client_phone,
+        propertyTitle: bookingData.property_title,
+        propertyId: bookingData.property_id,
+        tourDate: bookingData.appointment_date,
+        tourTime: bookingData.appointment_time,
+      })
     );
 
     return NextResponse.json({

@@ -87,6 +87,51 @@ export async function POST(request) {
       );
     }
 
+    // Insert notification into notifications_tbl for real-time display
+    try {
+      const { data: notificationData, error: notificationError } =
+        await supabaseAdmin
+          .from("notifications_tbl")
+          .insert({
+            notification_type: "user_registration",
+            source_table: "auth.users",
+            source_table_display_name: "User Registration",
+            source_record_id: null, // Set to null since it expects integer but we have UUID
+            title: "New User Registered",
+            message: `${fullName} (${email}) has successfully registered for an account.`,
+            icon: "👤",
+            priority: "normal",
+            status: "unread",
+            recipient_role: "admin", // Notify all admins
+            data: {
+              user_id: authData.user.id, // Store UUID in data field instead
+              email: authData.user.email,
+              full_name: fullName,
+              first_name: firstName,
+              last_name: lastName,
+              phone: phone || "",
+              address: address || "",
+              registered_at: new Date().toISOString(),
+            },
+            action_url: "/settings/users",
+          })
+          .select();
+
+      if (notificationError) {
+        console.error("❌ Notification insert error:", notificationError);
+        console.error(
+          "Error details:",
+          JSON.stringify(notificationError, null, 2)
+        );
+      } else {
+        console.log("✅ Notification created successfully for:", fullName);
+        console.log("Notification data:", notificationData);
+      }
+    } catch (notificationError) {
+      console.error("❌ Exception creating notification:", notificationError);
+      // Don't fail the signup if notification fails
+    }
+
     return NextResponse.json(
       {
         success: true,

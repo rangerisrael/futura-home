@@ -1,6 +1,7 @@
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { NotificationProvider } from "@/contexts/NotificationContext";
+import { RealNotificationProvider } from "@/contexts/RealNotificationContext";
 import { ClientAuthProvider } from "@/contexts/ClientAuthContext";
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
@@ -36,19 +37,21 @@ export default function RootLayout({ children }) {
       >
         <ClientAuthProvider>
           <NotificationProvider>
-            {children}
-            <ToastContainer
-              position="top-right"
-              autoClose={5000}
-              hideProgressBar={false}
-              newestOnTop={false}
-              closeOnClick
-              rtl={false}
-              pauseOnFocusLoss
-              draggable
-              pauseOnHover
-              theme="light"
-            />
+            <RealNotificationProvider>
+              {children}
+              <ToastContainer
+                position="top-right"
+                autoClose={5000}
+                hideProgressBar={false}
+                newestOnTop={false}
+                closeOnClick
+                rtl={false}
+                pauseOnFocusLoss
+                draggable
+                pauseOnHover
+                theme="light"
+              />
+            </RealNotificationProvider>
           </NotificationProvider>
         </ClientAuthProvider>
       </body>

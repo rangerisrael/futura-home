@@ -104,26 +104,13 @@ export default function ServiceRequests() {
 
       if (propertiesError) throw propertiesError;
 
-      // Load homeowners for form dropdown with property information
-      const { data: homeownersData, error: homeownersError } = await supabase
-        .from("buyer_home_owner_tbl")
-        .select(
-          `
-          id,
-          full_name,
-          unit_number,
-          property_id,
-          property_info_tbl!buyer_home_owner_tbl_property_id_fkey(
-            property_id,
-            property_title,
-            lot_tbl(lot_number),
-            property_detail_tbl(property_name)
-          )
-        `
-        )
-        .order("full_name");
+      // Load homeowners who have contracts only
+      const homeownersResponse = await fetch("/api/homeowners/with-contracts");
+      const homeownersResult = await homeownersResponse.json();
 
-      if (homeownersError) throw homeownersError;
+      const homeownersData = homeownersResult.success ? homeownersResult.data : [];
+
+      console.log("✅ Loaded homeowners with contracts:", homeownersData.length);
 
       setRequests(requestsData || []);
       setProperties(propertiesData || []);
@@ -239,14 +226,11 @@ export default function ServiceRequests() {
       return;
     }
 
-    const selectedHomeowner = homeowners.find(
-      (h) => h.id.toString() === selectedOption.value
-    );
-
+    // Clear property_id when homeowner changes so user must select property
     setFormData((prev) => ({
       ...prev,
       homeowner_id: selectedOption.value,
-      property_id: selectedHomeowner?.property_id?.toString() || "",
+      property_id: "", // Reset property when homeowner changes
     }));
   };
 
@@ -820,50 +804,25 @@ export default function ServiceRequests() {
                       <ReactSelect
                         className="mt-2"
                         options={homeowners.map((homeowner) => ({
-                          value: homeowner.id.toString(),
-                          label: `${homeowner.full_name} - Unit ${
-                            homeowner.unit_number
-                          }${
-                            homeowner.property_info_tbl
-                              ? ` (${homeowner.property_info_tbl.property_title})`
-                              : ""
-                          }`,
+                          value: homeowner.id,
+                          label: `${homeowner.full_name} (${homeowner.email})`,
                         }))}
                         value={
                           formData.homeowner_id
                             ? {
                                 value: formData.homeowner_id,
                                 label: homeowners.find(
-                                  (h) =>
-                                    h.id.toString() === formData.homeowner_id
+                                  (h) => h.id === formData.homeowner_id
                                 )
                                   ? `${
                                       homeowners.find(
-                                        (h) =>
-                                          h.id.toString() ===
-                                          formData.homeowner_id
+                                        (h) => h.id === formData.homeowner_id
                                       ).full_name
-                                    } - Unit ${
+                                    } (${
                                       homeowners.find(
-                                        (h) =>
-                                          h.id.toString() ===
-                                          formData.homeowner_id
-                                      ).unit_number
-                                    }${
-                                      homeowners.find(
-                                        (h) =>
-                                          h.id.toString() ===
-                                          formData.homeowner_id
-                                      ).property_info_tbl
-                                        ? ` (${
-                                            homeowners.find(
-                                              (h) =>
-                                                h.id.toString() ===
-                                                formData.homeowner_id
-                                            ).property_info_tbl.property_title
-                                          })`
-                                        : ""
-                                    }`
+                                        (h) => h.id === formData.homeowner_id
+                                      ).email
+                                    })`
                                   : "Select homeowner",
                               }
                             : null
@@ -890,22 +849,58 @@ export default function ServiceRequests() {
                       >
                         Property <span className="text-red-500">*</span>
                       </Label>
-                      <Input
-                        type="text"
-                        className="mt-2 h-11 bg-slate-50 border-slate-300 cursor-not-allowed rounded-xl"
-                        value={
-                          formData.property_id &&
-                          homeowners.find(
-                            (h) => h.id.toString() === formData.homeowner_id
-                          )?.property_info_tbl
-                            ? homeowners.find(
-                                (h) => h.id.toString() === formData.homeowner_id
-                              ).property_info_tbl.property_title
-                            : ""
-                        }
-                        placeholder="Auto-filled from homeowner"
-                        readOnly
-                      />
+                      {formData.homeowner_id ? (
+                        <ReactSelect
+                          className="mt-2"
+                          options={
+                            homeowners
+                              .find((h) => h.id === formData.homeowner_id)
+                              ?.properties?.map((property) => ({
+                                value: property.property_id,
+                                label: property.property_title,
+                              })) || []
+                          }
+                          value={
+                            formData.property_id
+                              ? {
+                                  value: formData.property_id,
+                                  label:
+                                    homeowners
+                                      .find((h) => h.id === formData.homeowner_id)
+                                      ?.properties?.find(
+                                        (p) => p.property_id === formData.property_id
+                                      )?.property_title || "Select property",
+                                }
+                              : null
+                          }
+                          onChange={(selectedOption) =>
+                            handleInputChange(
+                              "property_id",
+                              selectedOption ? selectedOption.value : ""
+                            )
+                          }
+                          placeholder="Select homeowner's property..."
+                          isClearable
+                          isSearchable
+                          styles={{
+                            control: (base) => ({
+                              ...base,
+                              minHeight: "44px",
+                              borderRadius: "0.75rem",
+                              borderColor: "#cbd5e1",
+                            }),
+                          }}
+                        />
+                      ) : (
+                        <Input
+                          type="text"
+                          className="mt-2 h-11 bg-slate-50 border-slate-300 cursor-not-allowed rounded-xl"
+                          value=""
+                          placeholder="Select homeowner first"
+                          readOnly
+                          disabled
+                        />
+                      )}
                     </div>
                   </div>
                 </div>

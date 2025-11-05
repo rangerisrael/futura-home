@@ -35,7 +35,9 @@ function checkRateLimit(email) {
   const requests = rateLimitMap.get(key) || [];
 
   // Filter out old requests outside the time window
-  const recentRequests = requests.filter(timestamp => now - timestamp < windowMs);
+  const recentRequests = requests.filter(
+    (timestamp) => now - timestamp < windowMs
+  );
 
   if (recentRequests.length >= maxRequests) {
     return {
@@ -92,7 +94,7 @@ export async function POST(request) {
     if (inquiryData.recaptcha_token) {
       const recaptchaResult = await validateInquiryRecaptcha(
         inquiryData.recaptcha_token,
-        'inquiry_submit',
+        "inquiry_submit",
         0.5 // Minimum score threshold
       );
 
@@ -117,7 +119,9 @@ export async function POST(request) {
         score: recaptchaResult.score,
       });
     } else {
-      console.warn("⚠️ No reCAPTCHA token provided - proceeding without verification");
+      console.warn(
+        "⚠️ No reCAPTCHA token provided - proceeding without verification"
+      );
     }
 
     // Check rate limit
@@ -149,7 +153,8 @@ export async function POST(request) {
         {
           success: false,
           error: "Duplicate inquiry",
-          message: "You have already submitted an inquiry for this property recently. Our team will contact you soon.",
+          message:
+            "You have already submitted an inquiry for this property recently. Our team will contact you soon.",
         },
         { status: 409 }
       );
@@ -187,6 +192,51 @@ export async function POST(request) {
     }
 
     console.log("✅ Inquiry created successfully:", inquiry.inquiry_id);
+
+    // Create notification for new inquiry
+    try {
+      const fullName = `${inquiryData.client_firstname} ${inquiryData.client_lastname}`;
+      const { data: notificationData, error: notificationError } =
+        await supabaseAdmin
+          .from("notifications_tbl")
+          .insert({
+            notification_type: "inquiry_received",
+            source_table: "client_inquiries",
+            source_table_display_name: "Client Inquiry",
+            source_record_id: null,
+            title: "New Property Inquiry",
+            message: `${fullName} (${
+              inquiryData.client_email
+            }) sent an inquiry about ${
+              inquiryData.property_title || "a property"
+            }.`,
+            icon: "❓",
+            priority: "normal",
+            status: "unread",
+            recipient_role: "sales representative",
+            data: {
+              inquiry_id: inquiry.inquiry_id,
+              property_id: inquiryData.property_id,
+              property_title: inquiryData.property_title,
+              client_name: fullName,
+              client_email: inquiryData.client_email,
+              client_phone: inquiryData.client_phone,
+              message: inquiryData.message,
+              created_at: new Date().toISOString(),
+            },
+            action_url: "/client-inquiries",
+          })
+          .select();
+
+      if (notificationError) {
+        console.error("❌ Notification insert error:", notificationError);
+      } else {
+        console.log("✅ Notification created for inquiry:", inquiry.inquiry_id);
+      }
+    } catch (notificationError) {
+      console.error("❌ Exception creating notification:", notificationError);
+      // Don't fail the inquiry if notification fails
+    }
 
     return NextResponse.json({
       success: true,

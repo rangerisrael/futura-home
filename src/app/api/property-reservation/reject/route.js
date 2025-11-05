@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
+import { createNotification, NotificationTemplates } from "@/lib/notification-helper";
 
 // Function to create Supabase admin client safely
 function createSupabaseAdmin() {
@@ -71,6 +72,29 @@ export async function POST(request) {
     }
 
     console.log("✅ Reservation rejected successfully:", reservation_id);
+
+    // Send rejection notification to the client
+    try {
+      await createNotification(supabaseAdmin, {
+        ...NotificationTemplates.RESERVATION_REJECTED({
+          reservationId: reservation.reservation_id,
+          trackingNumber: reservation.tracking_number,
+          propertyId: reservation.property_id,
+          propertyTitle: reservation.property_title,
+          clientName: reservation.client_name,
+          clientEmail: reservation.client_email,
+          reservationFee: reservation.reservation_fee,
+          status: "rejected",
+          notes: reason || null,
+        }),
+        recipientId: reservation.user_id, // Send to specific client
+        recipientRole: null, // Override role-based targeting
+      });
+      console.log(`✅ Rejection notification sent to user: ${reservation.user_id}`);
+    } catch (notificationError) {
+      console.error("❌ Exception creating notification:", notificationError);
+      // Don't fail the rejection if notification fails
+    }
 
     return NextResponse.json({
       success: true,

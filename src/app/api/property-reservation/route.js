@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import { uploadFileToStorage, validateFile } from "@/lib/storage";
+import { createNotification, getUserIdsByRole, NotificationTemplates } from "@/lib/notification-helper";
 
 // Function to create Supabase admin client safely
 function createSupabaseAdmin() {
@@ -209,6 +210,31 @@ export async function POST(request) {
 
     console.log("✅ Reservation created successfully:", reservation.reservation_id);
 
+    // Create notification for new reservation (role-based: sales reps + admins)
+    try {
+      await createNotification(supabaseAdmin, {
+        ...NotificationTemplates.RESERVATION_SUBMITTED({
+          reservationId: reservation.reservation_id,
+          trackingNumber: trackingNumber,
+          propertyId: reservationData.property_id,
+          propertyTitle: reservationData.property_title,
+          clientName: reservationData.client_name,
+          clientEmail: reservationData.client_email,
+          clientPhone: reservationData.client_phone,
+          monthlyIncome: reservationData.monthly_income,
+          employmentStatus: reservationData.employment_status,
+        }),
+        // Sales reps will see it (role matches)
+        // Admins will see it (admins see all)
+        // Customer service will NOT see it (role doesn't match)
+      });
+
+      console.log(`✅ Notification created for sales representatives and admins`);
+    } catch (notificationError) {
+      console.error("❌ Exception creating notification:", notificationError);
+      // Don't fail the reservation if notification fails
+    }
+
     return NextResponse.json({
       success: true,
       data: reservation,
@@ -221,6 +247,149 @@ export async function POST(request) {
         success: false,
         error: error.message,
         message: "Failed to submit reservation: " + error.message,
+      },
+      { status: 500 }
+    );
+  }
+}
+
+// PUT endpoint to update reservation status (approve/reject)
+export async function PUT(request) {
+  try {
+    const body = await request.json();
+    const { reservationId, status, notes } = body;
+
+    console.log("🔄 API: Updating reservation status:", { reservationId, status });
+
+    // Check if Supabase admin client is available
+    if (!supabaseAdmin) {
+      return NextResponse.json(
+        { error: "Server configuration error" },
+        { status: 500 }
+      );
+    }
+
+    // Validate required fields
+    if (!reservationId || !status) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Missing required fields",
+          message: "Reservation ID and status are required",
+        },
+        { status: 400 }
+      );
+    }
+
+    // Validate status value
+    if (!["approved", "rejected", "pending", "cancelled"].includes(status)) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Invalid status",
+          message: "Status must be one of: approved, rejected, pending, cancelled",
+        },
+        { status: 400 }
+      );
+    }
+
+    // Get the existing reservation first
+    const { data: existingReservation, error: fetchError } = await supabaseAdmin
+      .from("property_reservations")
+      .select("*")
+      .eq("reservation_id", reservationId)
+      .single();
+
+    if (fetchError || !existingReservation) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Reservation not found",
+          message: "Could not find the specified reservation",
+        },
+        { status: 404 }
+      );
+    }
+
+    // Update the reservation status
+    const updateData = {
+      status: status,
+      updated_at: new Date().toISOString(),
+    };
+
+    if (notes) {
+      updateData.admin_notes = notes;
+    }
+
+    const { data: updatedReservation, error: updateError } = await supabaseAdmin
+      .from("property_reservations")
+      .update(updateData)
+      .eq("reservation_id", reservationId)
+      .select()
+      .single();
+
+    if (updateError) {
+      console.error("❌ Update error:", updateError);
+      return NextResponse.json(
+        {
+          success: false,
+          error: updateError.message,
+          message: "Failed to update reservation: " + updateError.message,
+        },
+        { status: 400 }
+      );
+    }
+
+    console.log(`✅ Reservation ${reservationId} status updated to: ${status}`);
+
+    // Create notification for the client who made the reservation
+    try {
+      const notificationData = {
+        reservationId: existingReservation.reservation_id,
+        trackingNumber: existingReservation.tracking_number,
+        propertyId: existingReservation.property_id,
+        propertyTitle: existingReservation.property_title,
+        clientName: existingReservation.client_name,
+        clientEmail: existingReservation.client_email,
+        reservationFee: existingReservation.reservation_fee,
+        status: status,
+        notes: notes || null,
+      };
+
+      if (status === "approved") {
+        // Send approval notification to the client
+        await createNotification(supabaseAdmin, {
+          ...NotificationTemplates.RESERVATION_APPROVED(notificationData),
+          recipientId: existingReservation.user_id, // Send to specific client
+          recipientRole: null, // Override role-based targeting
+        });
+        console.log(`✅ Approval notification sent to user: ${existingReservation.user_id}`);
+      } else if (status === "rejected") {
+        // Send rejection notification to the client
+        await createNotification(supabaseAdmin, {
+          ...NotificationTemplates.RESERVATION_REJECTED(notificationData),
+          recipientId: existingReservation.user_id, // Send to specific client
+          recipientRole: null, // Override role-based targeting
+        });
+        console.log(`✅ Rejection notification sent to user: ${existingReservation.user_id}`);
+      }
+    } catch (notificationError) {
+      console.error("❌ Exception creating notification:", notificationError);
+      // Don't fail the update if notification fails
+    }
+
+    return NextResponse.json({
+      success: true,
+      data: updatedReservation,
+      message: `Reservation ${status} successfully`,
+    });
+  } catch (error) {
+    console.error("❌ Update reservation error:", error);
+    return NextResponse.json(
+      {
+        success: false,
+        error: error.message,
+        message: "Failed to update reservation: " + error.message,
       },
       { status: 500 }
     );
@@ -289,8 +458,9 @@ export async function GET(request) {
           .eq("reservation_id", reservation.reservation_id)
           .single();
 
-        // If contract exists, fetch payment schedules
+        // If contract exists, fetch payment schedules and transfer history
         let paymentSchedules = null;
+        let transferHistory = null;
         if (contract) {
           const { data: schedules } = await supabaseAdmin
             .from("contract_payment_schedules")
@@ -298,12 +468,22 @@ export async function GET(request) {
             .eq("contract_id", contract.contract_id)
             .order("installment_number", { ascending: true });
 
+          // Fetch transfer history (most recent transfer)
+          const { data: transfers } = await supabaseAdmin
+            .from("contract_transfer_history")
+            .select("*")
+            .eq("contract_id", contract.contract_id)
+            .order("transferred_at", { ascending: false })
+            .limit(1);
+
           paymentSchedules = schedules || [];
+          transferHistory = transfers && transfers.length > 0 ? transfers[0] : null;
         }
 
         return {
           ...reservation,
           contract: contract || null,
+          transfer_history: transferHistory,
           payment_schedules: paymentSchedules,
         };
       })

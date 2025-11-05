@@ -2,10 +2,17 @@
 import React, { createContext, useContext, useState, useEffect } from "react";
 import { createClient } from "@supabase/supabase-js";
 
-// Initialize Supabase client
+// Initialize Supabase client with realtime enabled
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+  {
+    realtime: {
+      params: {
+        eventsPerSecond: 10,
+      },
+    },
+  }
 );
 
 const RealNotificationContext = createContext();
@@ -26,36 +33,65 @@ export const RealNotificationProvider = ({ children }) => {
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [subscriptionStatus, setSubscriptionStatus] = useState("initializing");
 
-  // Load notifications from Supabase
+  // Load notifications from API
   const loadNotifications = async () => {
     try {
-      console.log("Loading notifications from Supabase...");
+      console.log("🔍 Loading notifications from API...");
 
-      const { data, error } = await supabase
-        .from("notifications_tbl")
-        .select("*")
-        .order("created_at", { ascending: false })
-        .limit(50); // Get last 50 notifications
+      // Get current user ID and role
+      const { data: { user } } = await supabase.auth.getUser();
+      const userId = user?.id;
+      const userRole = user?.user_metadata?.role?.toLowerCase();
 
-      if (error) {
-        console.error("Error loading notifications:", error);
-        // If table doesn't exist, show helpful message
-        if (
-          error.message &&
-          error.message.includes("relation") &&
-          error.message.includes("does not exist")
-        ) {
-          console.warn(
-            "Notifications table does not exist. Please run the notification-supabase.sql schema first."
-          );
-        }
+      console.log("👤 Current User Info:");
+      console.log("  - User ID:", userId);
+      console.log("  - User Email:", user?.email);
+      console.log("  - User Role:", userRole);
+      console.log("  - Full user_metadata:", user?.user_metadata);
+      console.log("  - Full user object:", user);
+
+      // Build query params
+      const params = new URLSearchParams();
+      if (userId) params.append("userId", userId);
+      if (userRole) params.append("role", userRole);
+
+      console.log("📤 Fetching notifications with params:", params.toString());
+      const response = await fetch(`/api/notifications?${params.toString()}`);
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const result = await response.json();
+
+      if (!result.success) {
+        console.error("❌ API returned error:", result.error);
         return;
       }
 
-      console.log("Loaded notifications:", data?.length || 0);
+      const data = result.notifications;
 
-      // Transform Supabase data to match our component format
+      console.log("✅ Loaded notifications from API:", data?.length || 0);
+
+      // Debug: Show what notifications were returned and for which roles
+      if (data && data.length > 0) {
+        console.log("📋 Notifications received:");
+        data.forEach((notif, index) => {
+          console.log(`  ${index + 1}. "${notif.title}"`);
+          console.log(`     - recipient_role: "${notif.recipient_role}"`);
+          console.log(`     - recipient_id: ${notif.recipient_id || 'null'}`);
+          console.log(`     - Who can see this?`);
+          console.log(`       • Admin: ${notif.recipient_role === 'admin' || notif.recipient_role === 'all' ? '✅ YES' : '❌ NO'}`);
+          console.log(`       • Sales Rep: ${notif.recipient_role === 'sales representative' || notif.recipient_role === 'all' ? '✅ YES' : '❌ NO'}`);
+          console.log(`       • Customer Service: ${notif.recipient_role === 'customer service' || notif.recipient_role === 'all' ? '✅ YES' : '❌ NO'}`);
+          console.log(`       • Collection: ${notif.recipient_role === 'collection' || notif.recipient_role === 'all' ? '✅ YES' : '❌ NO'}`);
+        });
+      }
+
+      // Transform API data to match our component format
       const transformedNotifications = (data || []).map((notification) => ({
         id: notification.id,
         type: notification.notification_type,
@@ -65,6 +101,7 @@ export const RealNotificationProvider = ({ children }) => {
         timestamp: notification.created_at,
         read: notification.status === "read",
         action: getActionFromUrl(notification.action_url),
+        action_url: notification.action_url, // Keep the actual URL
         priority: notification.priority,
         title: notification.title,
         message: notification.message,
@@ -72,14 +109,17 @@ export const RealNotificationProvider = ({ children }) => {
       }));
 
       setNotifications(transformedNotifications);
+      console.log("📦 Transformed notifications:", transformedNotifications);
 
       // Count unread notifications
       const unread = transformedNotifications.filter((n) => !n.read).length;
       setUnreadCount(unread);
+      console.log("🔔 Unread count:", unread);
     } catch (error) {
-      console.error("Error loading notifications:", error);
+      console.error("❌ Exception in loadNotifications:", error);
     } finally {
       setLoading(false);
+      console.log("✅ Loading complete");
     }
   };
 
@@ -103,97 +143,223 @@ export const RealNotificationProvider = ({ children }) => {
     return actionMap[actionUrl] || "View Details";
   };
 
+  // Check if notification is for current user
+  const isNotificationForCurrentUser = (notification, userInfo = currentUser) => {
+    if (!userInfo) {
+      console.warn("⚠️ No current user set, skipping notification");
+      return false;
+    }
+
+    const recipientRole = notification.recipient_role?.toLowerCase();
+    const recipientId = notification.recipient_id;
+    const userId = userInfo.id;
+    const userRole = userInfo.role?.toLowerCase();
+
+    console.log("🔍 Checking notification visibility:");
+    console.log("  - Notification recipient_role:", recipientRole);
+    console.log("  - Notification recipient_id:", recipientId);
+    console.log("  - Current user ID:", userId);
+    console.log("  - Current user role:", userRole);
+    console.log("  - Notification object:", notification);
+
+    // If specific user ID is set, check if it matches (HIGHEST PRIORITY)
+    if (recipientId) {
+      if (recipientId === userId) {
+        console.log("  ✅ Notification is for specific user (ID match)");
+        return true;
+      } else {
+        console.log("  ❌ Notification has recipient_id but doesn't match current user");
+        return false;
+      }
+    }
+
+    // If recipient_role is "all", everyone should see it
+    if (recipientRole === "all") {
+      console.log("  ✅ Notification is for ALL users");
+      return true;
+    }
+
+    // If role matches current user's role
+    if (recipientRole && recipientRole === userRole) {
+      console.log("  ✅ Notification is for user's role");
+      return true;
+    }
+
+    console.log("  ❌ Notification is NOT for current user");
+    return false;
+  };
+
   // Set up real-time subscription
   useEffect(() => {
-    // Initial load
-    loadNotifications();
+    console.log("🚀 RealNotificationProvider mounted - Setting up...");
 
-    // Set up real-time listener for new notifications
-    const notificationSubscription = supabase
-      .channel("notifications_realtime")
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "notifications_tbl",
-        },
-        (payload) => {
-          console.log("New notification received:", payload);
+    let notificationSubscription = null;
+    let reconnectTimeout = null;
+    let pollingInterval = null;
 
-          const newNotification = {
-            id: payload.new.id,
-            type: payload.new.notification_type,
-            table: payload.new.source_table,
-            tableName: payload.new.source_table_display_name,
-            data: payload.new.data,
-            timestamp: payload.new.created_at,
-            read: false,
-            action: getActionFromUrl(payload.new.action_url),
-            priority: payload.new.priority,
-            title: payload.new.title,
-            message: payload.new.message,
-            icon: payload.new.icon,
+    // Get current user and set up subscription
+    const setupRealtimeSubscription = async () => {
+      try {
+        // Get current user info
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          const userInfo = {
+            id: user.id,
+            role: user.user_metadata?.role?.toLowerCase(),
           };
-
-          // Add to notifications list
-          setNotifications((prev) => [newNotification, ...prev.slice(0, 49)]);
-          setUnreadCount((prev) => prev + 1);
-
-          // Show browser notification if permission granted
-          if (Notification.permission === "granted") {
-            new Notification(newNotification.title, {
-              body: newNotification.message,
-              icon: "/favicon.ico",
-              tag: `notification-${newNotification.id}`,
-              requireInteraction: newNotification.priority === "urgent",
-            });
-          }
-
-          // Play sound for high priority notifications
-          if (
-            newNotification.priority === "urgent" ||
-            newNotification.priority === "high"
-          ) {
-            try {
-              const audio = new Audio(
-                "data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBjuV2/LNeSsFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBjuV2/LNeSsFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBjuV2/LNeSsFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBjuV2/LNeSsFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBjuV2/LNeSsFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBjuV2/LNeSsFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBjuV2/LNeSsFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBjuV2/LNeSsFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBjuV2/LNeSsFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBjuV2/LNeSsFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBjuV2/LNeSsFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBjuV2/LNeSsFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBjuV2/LNeSsFJHfH8N2QQAoUXrTp66hVFA=="
-              );
-              audio.volume = 0.3;
-              audio.play().catch(() => {}); // Ignore errors if audio can't play
-            } catch (error) {
-              // Ignore audio errors
-            }
-          }
+          setCurrentUser(userInfo);
+          console.log("👤 Current user set:", userInfo);
         }
-      )
-      .subscribe();
 
-    // Request notification permission
-    if ("Notification" in window && Notification.permission === "default") {
-      Notification.requestPermission();
-    }
+        // Initial load
+        await loadNotifications();
+
+        // Set up real-time listener for new notifications
+        console.log("📡 Setting up real-time subscription...");
+        notificationSubscription = supabase
+          .channel("notifications_realtime", {
+            config: {
+              broadcast: { self: true },
+            },
+          })
+          .on(
+            "postgres_changes",
+            {
+              event: "INSERT",
+              schema: "public",
+              table: "notifications_tbl",
+            },
+            (payload) => {
+              console.log("🆕 New notification received via realtime:", payload);
+
+              // Check if notification is for current user BEFORE adding to state
+              if (!isNotificationForCurrentUser(payload.new, userInfo)) {
+                console.log("⏭️ Skipping notification - not for current user");
+                return;
+              }
+
+              const newNotification = {
+                id: payload.new.id,
+                type: payload.new.notification_type,
+                table: payload.new.source_table,
+                tableName: payload.new.source_table_display_name,
+                data: payload.new.data,
+                timestamp: payload.new.created_at,
+                read: false,
+                action: getActionFromUrl(payload.new.action_url),
+                action_url: payload.new.action_url,
+                priority: payload.new.priority,
+                title: payload.new.title,
+                message: payload.new.message,
+                icon: payload.new.icon,
+              };
+
+              console.log("✅ Adding notification to state:", newNotification.title);
+
+              // Add to notifications list
+              setNotifications((prev) => [newNotification, ...prev.slice(0, 49)]);
+              setUnreadCount((prev) => prev + 1);
+
+              // Show browser notification if permission granted
+              if (Notification.permission === "granted") {
+                new Notification(newNotification.title, {
+                  body: newNotification.message,
+                  icon: "/favicon.ico",
+                  tag: `notification-${newNotification.id}`,
+                  requireInteraction: newNotification.priority === "urgent",
+                });
+              }
+
+              // Play sound for high priority notifications
+              if (
+                newNotification.priority === "urgent" ||
+                newNotification.priority === "high"
+              ) {
+                try {
+                  const audio = new Audio(
+                    "data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBjuV2/LNeSsFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBjuV2/LNeSsFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBjuV2/LNeSsFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBjuV2/LNeSsFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBjuV2/LNeSsFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBjuV2/LNeSsFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBjuV2/LNeSsFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBjuV2/LNeSsFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBjuV2/LNeSsFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBjuV2/LNeSsFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBjuV2/LNeSsFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBjuV2/LNeSsFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBjuV2/LNeSsFJHfH8N2QQAoUXrTp66hVFA=="
+                  );
+                  audio.volume = 0.3;
+                  audio.play().catch(() => {});
+                } catch (error) {
+                  // Ignore audio errors
+                }
+              }
+            }
+          )
+          .subscribe((status) => {
+            console.log("📡 Subscription status:", status);
+            setSubscriptionStatus(status);
+
+            if (status === "SUBSCRIBED") {
+              console.log("✅ Real-time subscription active!");
+              // Clear any reconnect timeout
+              if (reconnectTimeout) {
+                clearTimeout(reconnectTimeout);
+                reconnectTimeout = null;
+              }
+            } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+              console.error(`❌ Real-time subscription ${status}! Will attempt to reconnect...`);
+              // Attempt to reconnect after 5 seconds
+              reconnectTimeout = setTimeout(() => {
+                console.log("🔄 Attempting to reconnect...");
+                if (notificationSubscription) {
+                  supabase.removeChannel(notificationSubscription);
+                }
+                setupRealtimeSubscription();
+              }, 5000);
+            }
+          });
+
+        // Request notification permission
+        if ("Notification" in window && Notification.permission === "default") {
+          Notification.requestPermission();
+        }
+      } catch (error) {
+        console.error("❌ Error setting up realtime subscription:", error);
+        setSubscriptionStatus("error");
+      }
+    };
+
+    // Start the subscription
+    setupRealtimeSubscription();
+
+    // Set up polling as fallback (every 30 seconds)
+    pollingInterval = setInterval(() => {
+      console.log("🔄 Polling for new notifications (fallback)...");
+      loadNotifications();
+    }, 30000);
 
     // Cleanup subscription on unmount
     return () => {
-      supabase.removeChannel(notificationSubscription);
+      if (notificationSubscription) {
+        supabase.removeChannel(notificationSubscription);
+      }
+      if (reconnectTimeout) {
+        clearTimeout(reconnectTimeout);
+      }
+      if (pollingInterval) {
+        clearInterval(pollingInterval);
+      }
     };
   }, []);
 
   // Mark notification as read
   const markAsRead = async (notificationId) => {
     try {
-      const { error } = await supabase
-        .from("notifications_tbl")
-        .update({
+      const response = await fetch("/api/notifications", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: notificationId,
           status: "read",
-          read_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", notificationId);
+        }),
+      });
 
-      if (error) {
-        console.error("Error marking notification as read:", error);
+      const result = await response.json();
+
+      if (!result.success) {
+        console.error("Error marking notification as read:", result.error);
         return;
       }
 
@@ -212,18 +378,18 @@ export const RealNotificationProvider = ({ children }) => {
   // Mark all notifications as read
   const markAllAsRead = async () => {
     try {
-      const { error } = await supabase
-        .from("notifications_tbl")
-        .update({
-          status: "read",
-          read_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
-        .eq("status", "unread");
+      // Mark all unread notifications as read
+      const unreadNotifications = notifications.filter((n) => !n.read);
 
-      if (error) {
-        console.error("Error marking all notifications as read:", error);
-        return;
+      for (const notification of unreadNotifications) {
+        await fetch("/api/notifications", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id: notification.id,
+            status: "read",
+          }),
+        });
       }
 
       // Update local state
@@ -239,17 +405,16 @@ export const RealNotificationProvider = ({ children }) => {
   // Clear all notifications (mark as archived)
   const clearNotifications = async () => {
     try {
-      const { error } = await supabase
-        .from("notifications_tbl")
-        .update({
-          status: "archived",
-          updated_at: new Date().toISOString(),
-        })
-        .neq("status", "archived");
-
-      if (error) {
-        console.error("Error clearing notifications:", error);
-        return;
+      // Archive all notifications
+      for (const notification of notifications) {
+        await fetch("/api/notifications", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id: notification.id,
+            status: "archived",
+          }),
+        });
       }
 
       // Update local state
@@ -319,6 +484,7 @@ export const RealNotificationProvider = ({ children }) => {
     notifications,
     unreadCount,
     loading,
+    subscriptionStatus,
     markAsRead,
     markAllAsRead,
     clearNotifications,

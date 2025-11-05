@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
+import { createNotification, NotificationTemplates } from "@/lib/notification-helper";
 
 // Function to create Supabase admin client safely
 function createSupabaseAdmin() {
@@ -71,6 +72,29 @@ export async function POST(request) {
     }
 
     console.log("✅ Reservation approved successfully:", reservation_id);
+
+    // Send approval notification to the client
+    try {
+      await createNotification(supabaseAdmin, {
+        ...NotificationTemplates.RESERVATION_APPROVED({
+          reservationId: reservation.reservation_id,
+          trackingNumber: reservation.tracking_number,
+          propertyId: reservation.property_id,
+          propertyTitle: reservation.property_title,
+          clientName: reservation.client_name,
+          clientEmail: reservation.client_email,
+          reservationFee: reservation.reservation_fee,
+          status: "approved",
+          notes: notes || null,
+        }),
+        recipientId: reservation.user_id, // Send to specific client
+        recipientRole: null, // Override role-based targeting
+      });
+      console.log(`✅ Approval notification sent to user: ${reservation.user_id}`);
+    } catch (notificationError) {
+      console.error("❌ Exception creating notification:", notificationError);
+      // Don't fail the approval if notification fails
+    }
 
     // Create a transaction record for the reservation fee
     const receiptNumber = `RCT-${new Date().getFullYear()}-${reservation_id.slice(0, 8).toUpperCase()}`;

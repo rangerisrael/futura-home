@@ -26,11 +26,18 @@ import {
   ChevronDown,
   ChevronUp,
   ShieldCheck,
+  Eye,
+  Filter,
+  ArrowRightLeft,
+  RefreshCw,
+  User,
+  Undo2,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "react-toastify";
 import { createClient } from "@supabase/supabase-js";
 import WalkInPaymentModal from "./WalkInPaymentModal";
+import TransferContractModal from "./TransferContractModal";
 
 // Initialize Supabase client
 const supabase = createClient(
@@ -47,43 +54,18 @@ export default function CertifiedHomeOwner() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [selectedContract, setSelectedContract] = useState(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
-  const [expandedContracts, setExpandedContracts] = useState([]);
-  const contractRefs = React.useRef({});
   const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [showTransferModal, setShowTransferModal] = useState(false);
+  const [showRevertModal, setShowRevertModal] = useState(false);
   const [selectedSchedule, setSelectedSchedule] = useState(null);
   const [paymentContract, setPaymentContract] = useState(null);
+  const [transferContract, setTransferContract] = useState(null);
+  const [revertContract, setRevertContract] = useState(null);
+  const [revertLoading, setRevertLoading] = useState(false);
 
   useEffect(() => {
     loadContracts();
   }, []);
-
-  // Close accordion when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (event) => {
-      // Check if click is outside all expanded contracts
-      let clickedInside = false;
-
-      expandedContracts.forEach((contractId) => {
-        const contractElement = contractRefs.current[contractId];
-        if (contractElement && contractElement.contains(event.target)) {
-          clickedInside = true;
-        }
-      });
-
-      // If clicked outside, close all expanded contracts
-      if (!clickedInside && expandedContracts.length > 0) {
-        setExpandedContracts([]);
-      }
-    };
-
-    // Add event listener
-    document.addEventListener("mousedown", handleClickOutside);
-
-    // Cleanup
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-    };
-  }, [expandedContracts]);
 
   useEffect(() => {
     applyFilters();
@@ -94,8 +76,6 @@ export default function CertifiedHomeOwner() {
     try {
       const response = await fetch("/api/contracts");
       const result = await response.json();
-
-      console.log("Contracts result:", result);
 
       if (result.success) {
         setContracts(result.data);
@@ -148,46 +128,33 @@ export default function CertifiedHomeOwner() {
     const date = new Date(dateString);
     return date.toLocaleDateString("en-US", {
       year: "numeric",
-      month: "short",
+      month: "long",
       day: "numeric",
     });
   };
 
   const getStatusBadge = (status) => {
     const statusConfig = {
-      active: { color: "bg-green-100 text-green-800", label: "Active" },
-      completed: { color: "bg-blue-100 text-blue-800", label: "Completed" },
-      cancelled: { color: "bg-red-100 text-red-800", label: "Cancelled" },
-      defaulted: { color: "bg-orange-100 text-orange-800", label: "Defaulted" },
-      transferred: {
-        color: "bg-purple-100 text-purple-800",
-        label: "Transferred",
-      },
+      active: { color: "bg-green-100 text-green-800 border-green-200", label: "Approved", icon: CheckCircle },
+      completed: { color: "bg-blue-100 text-blue-800 border-blue-200", label: "Completed", icon: CheckCircle },
+      cancelled: { color: "bg-red-100 text-red-800 border-red-200", label: "Cancelled", icon: XCircle },
+      pending: { color: "bg-yellow-100 text-yellow-800 border-yellow-200", label: "Pending", icon: Clock },
     };
 
     const config = statusConfig[status] || {
-      color: "bg-gray-100 text-gray-800",
+      color: "bg-gray-100 text-gray-800 border-gray-200",
       label: status,
-    };
-    return <Badge className={config.color}>{config.label}</Badge>;
-  };
-
-  const getDownpaymentStatusBadge = (status) => {
-    const statusConfig = {
-      in_progress: {
-        color: "bg-yellow-100 text-yellow-800",
-        label: "In Progress",
-      },
-      completed: { color: "bg-green-100 text-green-800", label: "Completed" },
-      overdue: { color: "bg-red-100 text-red-800", label: "Overdue" },
-      defaulted: { color: "bg-orange-100 text-orange-800", label: "Defaulted" },
+      icon: AlertCircle,
     };
 
-    const config = statusConfig[status] || {
-      color: "bg-gray-100 text-gray-800",
-      label: status,
-    };
-    return <Badge className={config.color}>{config.label}</Badge>;
+    const Icon = config.icon;
+
+    return (
+      <Badge className={`${config.color} border flex items-center gap-1 w-fit`}>
+        <Icon className="w-3 h-3" />
+        {config.label}
+      </Badge>
+    );
   };
 
   const handleViewDetails = (contract) => {
@@ -195,610 +162,275 @@ export default function CertifiedHomeOwner() {
     setShowDetailModal(true);
   };
 
-  const toggleContract = (contractId) => {
-    setExpandedContracts((prev) =>
-      prev.includes(contractId)
-        ? prev.filter((id) => id !== contractId)
-        : [...prev, contractId]
-    );
-  };
-
   const handleWalkInPayment = (schedule, contract) => {
-    console.log("Opening payment modal for:", {
-      contractNumber: contract.contract_number,
-      scheduleId: schedule.schedule_id,
-      installmentNumber: schedule.installment_number,
-      amount: schedule.remaining_amount,
-    });
-
     setSelectedSchedule(schedule);
     setPaymentContract(contract);
     setShowPaymentModal(true);
   };
 
   const handlePaymentSuccess = (paymentData) => {
-    console.log("Payment successful:", paymentData);
-
     toast.success(
-      `Payment processed successfully! Receipt: ${
-        paymentData.transaction?.receipt_number || "Pending"
-      }`
+      `Payment processed successfully!`
     );
-
-    // Reload contracts to get updated data
     loadContracts();
-
-    // Close modals
     setShowPaymentModal(false);
     setShowDetailModal(false);
+  };
+
+  const handleTransferContract = (contract) => {
+    setTransferContract(contract);
+    setShowTransferModal(true);
+  };
+
+  const handleTransferSuccess = (transferData) => {
+    toast.success("Contract transferred successfully!");
+    loadContracts();
+    setShowTransferModal(false);
+  };
+
+  const handleRevertTransfer = (contract) => {
+    setRevertContract(contract);
+    setShowRevertModal(true);
+  };
+
+  const confirmRevertTransfer = async () => {
+    if (!revertContract || !revertContract.transfer_history) {
+      toast.error("No transfer history found for this contract");
+      return;
+    }
+
+    setRevertLoading(true);
+
+    try {
+      const response = await fetch("/api/contracts/revert-transfer", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          contract_id: revertContract.contract_id,
+          transfer_id: revertContract.transfer_history.transfer_id,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        toast.success("Contract transfer reverted successfully!");
+        setShowRevertModal(false);
+        setShowDetailModal(false);
+        loadContracts();
+      } else {
+        toast.error(result.message || "Failed to revert transfer");
+      }
+    } catch (error) {
+      console.error("Error reverting transfer:", error);
+      toast.error("Error reverting transfer. Please try again.");
+    } finally {
+      setRevertLoading(false);
+    }
   };
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
       {/* Header */}
       <div className="mb-6">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2 flex items-center gap-3">
-          <ShieldCheck className="w-8 h-8 text-blue-600" />
-          Certified Home Owner
+        <h1 className="text-3xl font-bold text-gray-900 mb-2">
+          Certified Property Reservations
         </h1>
         <p className="text-gray-600">
-          View and manage all property purchase contracts
+          View and manage your property reservations
         </p>
       </div>
 
-      {/* Filters and Search */}
-      <Card className="mb-6">
-        <CardContent className="p-4">
-          <div className="flex flex-col md:flex-row gap-4">
-            {/* Search */}
-            <div className="flex-1">
+      {/* Search and Filters Card */}
+      <Card className="mb-6 shadow-sm">
+        <CardContent className="p-6">
+          <div className="flex flex-col md:flex-row gap-4 items-center">
+            {/* Search Input */}
+            <div className="flex-1 w-full">
               <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
                 <Input
                   type="text"
-                  placeholder="Search by contract number, client name, email, phone, or property..."
+                  placeholder="Search by property, contract number, or tracking number..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-10"
+                  className="pl-10 h-12 text-base"
                 />
               </div>
             </div>
 
-            {/* Status Filter */}
-            <div className="flex gap-2">
-              <Button
-                variant={statusFilter === "all" ? "default" : "outline"}
-                onClick={() => setStatusFilter("all")}
-                size="sm"
+            {/* Status Filter Dropdown */}
+            <div className="flex items-center gap-2">
+              <Filter className="w-5 h-5 text-gray-500" />
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                className="h-12 px-4 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 bg-white text-gray-700"
               >
-                All
-              </Button>
-              <Button
-                variant={statusFilter === "active" ? "default" : "outline"}
-                onClick={() => setStatusFilter("active")}
-                size="sm"
-              >
-                Active
-              </Button>
-              <Button
-                variant={statusFilter === "completed" ? "default" : "outline"}
-                onClick={() => setStatusFilter("completed")}
-                size="sm"
-              >
-                Completed
-              </Button>
+                <option value="all">All Status</option>
+                <option value="active">Approved</option>
+                <option value="pending">Pending</option>
+                <option value="completed">Completed</option>
+                <option value="cancelled">Cancelled</option>
+              </select>
             </div>
-          </div>
 
-          {/* Stats Summary */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
-            <div className="bg-blue-50 p-3 rounded-lg">
-              <p className="text-xs text-blue-600 font-semibold">
-                Total Contracts
-              </p>
-              <p className="text-2xl font-bold text-blue-900">
-                {contracts.length}
-              </p>
-            </div>
-            <div className="bg-green-50 p-3 rounded-lg">
-              <p className="text-xs text-green-600 font-semibold">Active</p>
-              <p className="text-2xl font-bold text-green-900">
-                {contracts.filter((c) => c.contract_status === "active").length}
-              </p>
-            </div>
-            <div className="bg-purple-50 p-3 rounded-lg">
-              <p className="text-xs text-purple-600 font-semibold">Completed</p>
-              <p className="text-2xl font-bold text-purple-900">
-                {
-                  contracts.filter((c) => c.contract_status === "completed")
-                    .length
-                }
-              </p>
-            </div>
-            <div className="bg-amber-50 p-3 rounded-lg">
-              <p className="text-xs text-amber-600 font-semibold">
-                In Progress
-              </p>
-              <p className="text-2xl font-bold text-amber-900">
-                {
-                  contracts.filter(
-                    (c) => c.downpayment_status === "in_progress"
-                  ).length
-                }
-              </p>
+            {/* Results Count */}
+            <div className="text-sm text-gray-600">
+              <span className="font-semibold">{filteredContracts.length}</span> of{" "}
+              <span className="font-semibold">{contracts.length}</span> reservations
             </div>
           </div>
         </CardContent>
       </Card>
 
-      {/* Contracts Table */}
-      {loading ? (
-        <div className="flex justify-center items-center py-12">
-          <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
-          <span className="ml-2 text-gray-600">Loading contracts...</span>
-        </div>
-      ) : filteredContracts.length === 0 ? (
-        <Card>
-          <CardContent className="p-12 text-center">
-            <FileText className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-            <p className="text-gray-500 text-lg">No contracts found</p>
-            <p className="text-gray-400 text-sm">
-              {searchTerm || statusFilter !== "all"
-                ? "Try adjusting your filters"
-                : "Contracts will appear here once created"}
-            </p>
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="space-y-6">
-          {filteredContracts.map((contract) => {
-            const isExpanded = expandedContracts.includes(contract.contract_id);
+      {/* Table Card */}
+      <Card className="shadow-md">
+        <CardContent className="p-0">
+          {loading ? (
+            <div className="flex justify-center items-center py-16">
+              <Loader2 className="w-10 h-10 animate-spin text-red-600" />
+              <span className="ml-3 text-gray-600 text-lg">Loading reservations...</span>
+            </div>
+          ) : filteredContracts.length === 0 ? (
+            <div className="p-16 text-center">
+              <FileText className="w-20 h-20 text-gray-300 mx-auto mb-4" />
+              <p className="text-gray-500 text-xl font-semibold">No contracts found</p>
+              <p className="text-gray-400 mt-2">
+                {searchTerm || statusFilter !== "all"
+                  ? "Try adjusting your filters"
+                  : "Contracts will appear here once created"}
+              </p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                {/* Table Header */}
+                <thead className="bg-gray-50 border-b-2 border-gray-200">
+                  <tr>
+                    <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">
+                      Property
+                    </th>
+                    <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">
+                      Contract #
+                    </th>
+                    <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">
+                      Date
+                    </th>
+                    <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">
+                      Amount
+                    </th>
+                    <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">
+                      Status
+                    </th>
+                    <th className="px-6 py-4 text-center text-xs font-bold text-gray-700 uppercase tracking-wider">
+                      Action
+                    </th>
+                  </tr>
+                </thead>
 
-            return (
-              <motion.div
-                key={contract.contract_id}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.3 }}
-                ref={(el) => (contractRefs.current[contract.contract_id] = el)}
-              >
-                <Card className="hover:shadow-xl transition-all duration-300 border-l-4 border-l-blue-500 overflow-hidden">
-                  {/* Header - Always Visible */}
-                  <CardContent className="p-6">
-                    <div
-                      className="flex items-center justify-between cursor-pointer"
-                      onClick={() => toggleContract(contract.contract_id)}
+                {/* Table Body */}
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {filteredContracts.map((contract, index) => (
+                    <motion.tr
+                      key={contract.contract_id}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: index * 0.05 }}
+                      className="hover:bg-gray-50 transition-colors"
                     >
-                      <div className="flex items-center gap-4 flex-1">
-                        <div className="p-3 bg-blue-100 rounded-xl">
-                          <FileSignature className="w-6 h-6 text-blue-600" />
-                        </div>
-                        <div className="flex-1">
-                          <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
-                            Contract Number
-                          </p>
-                          <h3 className="text-xl font-bold text-blue-900 mb-2">
-                            {contract.contract_number}
-                          </h3>
-                          <div className="flex gap-2 items-center flex-wrap">
-                            {getStatusBadge(contract.contract_status)}
-                            {getDownpaymentStatusBadge(
-                              contract.downpayment_status
+                      {/* Property Column */}
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-3">
+                          <div className="p-2 bg-red-100 rounded-lg">
+                            <Home className="w-5 h-5 text-red-600" />
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <p className="font-semibold text-gray-900">
+                                {contract.property_title}
+                              </p>
+                              {contract.transfer_history && (
+                                <Badge className="bg-blue-100 text-blue-800 text-xs flex items-center gap-1 px-2 py-0.5">
+                                  <RefreshCw className="w-3 h-3" />
+                                  Transferred
+                                </Badge>
+                              )}
+                            </div>
+                            <p className="text-sm text-gray-500 flex items-center gap-1">
+                              <User className="w-3 h-3" />
+                              {contract.client_name}
+                            </p>
+                            {contract.transfer_history && (
+                              <p className="text-xs text-blue-600 mt-0.5">
+                                From: {contract.transfer_history.original_client_name}
+                              </p>
                             )}
                           </div>
                         </div>
-                      </div>
+                      </td>
 
-                      {/* Quick Info - Visible when collapsed */}
-                      {!isExpanded && (
-                        <div className="hidden lg:flex items-center gap-6 mr-6">
-                          <div className="text-right">
-                            <p className="text-xs text-gray-500 font-medium">
-                              Client
-                            </p>
-                            <p className="font-semibold text-gray-900">
-                              {contract.client_name}
-                            </p>
-                          </div>
-                          <div className="text-right">
-                            <p className="text-xs text-gray-500 font-medium">
-                              Property
-                            </p>
-                            <p className="font-semibold text-gray-900">
-                              {contract.property_title}
-                            </p>
-                          </div>
-                          <div className="text-right">
-                            <p className="text-xs text-gray-500 font-medium">
-                              Balance
-                            </p>
-                            <p className="font-bold text-red-600">
-                              {formatCurrency(contract.remaining_balance)}
-                            </p>
-                          </div>
+                      {/* Contract Number Column */}
+                      <td className="px-6 py-4">
+                        <p className="font-mono font-semibold text-gray-900">
+                          {contract.contract_number}
+                        </p>
+                      </td>
+
+                      {/* Date Column */}
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-2">
+                          <Calendar className="w-4 h-4 text-gray-400" />
+                          <span className="text-gray-700">
+                            {formatDate(contract.contract_signed_date)}
+                          </span>
                         </div>
-                      )}
+                      </td>
 
-                      {/* Toggle Button */}
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="ml-4"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          toggleContract(contract.contract_id);
-                        }}
-                      >
-                        {isExpanded ? (
-                          <ChevronUp className="w-5 h-5 text-gray-600" />
-                        ) : (
-                          <ChevronDown className="w-5 h-5 text-gray-600" />
-                        )}
-                      </Button>
-                    </div>
-                  </CardContent>
+                      {/* Amount Column */}
+                      <td className="px-6 py-4">
+                        <p className="font-bold text-lg text-red-600">
+                          {formatCurrency(contract.remaining_balance)}
+                        </p>
+                      </td>
 
-                  {/* Expanded Content */}
-                  <AnimatePresence>
-                    {isExpanded && (
-                      <motion.div
-                        initial={{ height: 0, opacity: 0 }}
-                        animate={{ height: "auto", opacity: 1 }}
-                        exit={{ height: 0, opacity: 0 }}
-                        transition={{ duration: 0.3 }}
-                      >
-                        <CardContent className="pt-0 px-8 pb-8">
-                          <div className="flex flex-col lg:flex-row gap-8 pt-6 border-t border-gray-200">
-                            {/* Left: Contract Info */}
-                            <div className="flex-1 space-y-6">
-                              {/* Client Info Section */}
-                              <div className="bg-blue-50/50 rounded-xl p-5 border border-blue-100">
-                                <h5 className="text-sm font-bold text-gray-900 mb-4 flex items-center gap-2">
-                                  <Building2 className="w-4 h-4 text-blue-600" />
-                                  Client Information
-                                </h5>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                  <div className="space-y-1.5">
-                                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                                      Full Name
-                                    </p>
-                                    <p className="font-semibold text-gray-900 text-base">
-                                      {contract.client_name}
-                                    </p>
-                                  </div>
-                                  <div className="space-y-1.5">
-                                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                                      Email Address
-                                    </p>
-                                    <p className="font-medium text-gray-700">
-                                      {contract.client_email}
-                                    </p>
-                                  </div>
-                                  <div className="space-y-1.5">
-                                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                                      Phone Number
-                                    </p>
-                                    <p className="font-medium text-gray-700">
-                                      {contract.client_phone}
-                                    </p>
-                                  </div>
-                                  <div className="space-y-1.5">
-                                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                                      Property
-                                    </p>
-                                    <p className="font-semibold text-gray-900">
-                                      {contract.property_title}
-                                    </p>
-                                  </div>
-                                  {contract.client_address && (
-                                    <div className="space-y-1.5 md:col-span-2">
-                                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                                        Address
-                                      </p>
-                                      <p className="font-medium text-gray-700 leading-relaxed">
-                                        {contract.client_address}
-                                      </p>
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
+                      {/* Status Column */}
+                      <td className="px-6 py-4">
+                        {getStatusBadge(contract.contract_status)}
+                      </td>
 
-                              {/* Contract Dates Section */}
-                              <div className="bg-teal-50/50 rounded-xl p-5 border border-teal-100">
-                                <h5 className="text-sm font-bold text-gray-900 mb-4 flex items-center gap-2">
-                                  <Calendar className="w-4 h-4 text-teal-600" />
-                                  Important Dates
-                                </h5>
-                                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                                  <div className="space-y-1.5">
-                                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                                      Contract Signed
-                                    </p>
-                                    <p className="text-sm font-semibold text-gray-900">
-                                      {formatDate(
-                                        contract.contract_signed_date
-                                      )}
-                                    </p>
-                                  </div>
-                                  <div className="space-y-1.5">
-                                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                                      First Installment
-                                    </p>
-                                    <p className="text-sm font-semibold text-gray-900">
-                                      {formatDate(
-                                        contract.first_installment_date
-                                      )}
-                                    </p>
-                                  </div>
-                                  <div className="space-y-1.5">
-                                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                                      Final Installment
-                                    </p>
-                                    <p className="text-sm font-semibold text-gray-900">
-                                      {formatDate(
-                                        contract.final_installment_date
-                                      )}
-                                    </p>
-                                  </div>
-                                  <div className="space-y-1.5">
-                                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                                      Created Date
-                                    </p>
-                                    <p className="text-sm font-semibold text-gray-900">
-                                      {formatDate(contract.created_at)}
-                                    </p>
-                                  </div>
-                                  {contract.contract_completion_date && (
-                                    <div className="space-y-1.5">
-                                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                                        Completion Date
-                                      </p>
-                                      <p className="text-sm font-semibold text-gray-900">
-                                        {formatDate(
-                                          contract.contract_completion_date
-                                        )}
-                                      </p>
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-
-                              {/* Bank Financing Section */}
-                              {contract.bank_financing_amount > 0 && (
-                                <div className="bg-purple-50/50 rounded-xl p-5 border border-purple-100">
-                                  <h5 className="text-sm font-bold text-gray-900 mb-4 flex items-center gap-2">
-                                    <TrendingUp className="w-4 h-4 text-purple-600" />
-                                    Bank Financing Details (90%)
-                                  </h5>
-                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <div className="space-y-1.5">
-                                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                                        Financing Amount
-                                      </p>
-                                      <p className="font-bold text-purple-900 text-lg">
-                                        {formatCurrency(
-                                          contract.bank_financing_amount
-                                        )}
-                                      </p>
-                                    </div>
-                                    <div className="space-y-1.5">
-                                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                                        Status
-                                      </p>
-                                      <Badge className="bg-purple-200 text-purple-900 font-medium">
-                                        {contract.bank_financing_status ||
-                                          "Pending"}
-                                      </Badge>
-                                    </div>
-                                    {contract.bank_name && (
-                                      <div className="space-y-1.5">
-                                        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                                          Bank Name
-                                        </p>
-                                        <p className="font-medium text-gray-900">
-                                          {contract.bank_name}
-                                        </p>
-                                      </div>
-                                    )}
-                                    {contract.bank_loan_number && (
-                                      <div className="space-y-1.5">
-                                        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                                          Loan Number
-                                        </p>
-                                        <p className="font-medium text-gray-900">
-                                          {contract.bank_loan_number}
-                                        </p>
-                                      </div>
-                                    )}
-                                    {contract.bank_approval_date && (
-                                      <div className="space-y-1.5">
-                                        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                                          Approval Date
-                                        </p>
-                                        <p className="font-medium text-gray-900">
-                                          {formatDate(
-                                            contract.bank_approval_date
-                                          )}
-                                        </p>
-                                      </div>
-                                    )}
-                                    {contract.bank_release_date && (
-                                      <div className="space-y-1.5">
-                                        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                                          Release Date
-                                        </p>
-                                        <p className="font-medium text-gray-900">
-                                          {formatDate(
-                                            contract.bank_release_date
-                                          )}
-                                        </p>
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-                              )}
-
-                              {/* Special Terms & Notes */}
-                              {(contract.special_terms || contract.notes) && (
-                                <div className="bg-amber-50/50 rounded-xl p-5 border border-amber-100">
-                                  <h5 className="text-sm font-bold text-gray-900 mb-4 flex items-center gap-2">
-                                    <FileText className="w-4 h-4 text-amber-600" />
-                                    Additional Information
-                                  </h5>
-                                  {contract.special_terms && (
-                                    <div className="space-y-1.5 mb-3">
-                                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                                        Special Terms
-                                      </p>
-                                      <p className="font-medium text-gray-700 leading-relaxed">
-                                        {contract.special_terms}
-                                      </p>
-                                    </div>
-                                  )}
-                                  {contract.notes && (
-                                    <div className="space-y-1.5">
-                                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                                        Notes
-                                      </p>
-                                      <p className="font-medium text-gray-700 leading-relaxed">
-                                        {contract.notes}
-                                      </p>
-                                    </div>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-
-                            {/* Right: Payment Info */}
-                            <div className="lg:w-96 bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 rounded-2xl p-6 shadow-sm border border-blue-100">
-                              <h4 className="text-lg font-bold text-gray-900 mb-5 flex items-center gap-3">
-                                <div className="p-2 bg-white rounded-lg shadow-sm">
-                                  <DollarSign className="w-5 h-5 text-blue-600" />
-                                </div>
-                                Payment Information
-                              </h4>
-
-                              <div className="space-y-4 mb-6">
-                                <div className="flex justify-between items-center">
-                                  <span className="text-sm font-medium text-gray-600">
-                                    Property Price
-                                  </span>
-                                  <span className="font-bold text-gray-900 text-lg">
-                                    {formatCurrency(contract.property_price)}
-                                  </span>
-                                </div>
-                                <div className="flex justify-between items-center">
-                                  <span className="text-sm font-medium text-gray-600">
-                                    Downpayment (10%)
-                                  </span>
-                                  <span className="font-bold text-blue-700 text-lg">
-                                    {formatCurrency(contract.downpayment_total)}
-                                  </span>
-                                </div>
-                                <div className="flex justify-between items-center">
-                                  <span className="text-sm font-medium text-gray-600">
-                                    Reservation Fee
-                                  </span>
-                                  <span className="font-semibold text-green-600">
-                                    {formatCurrency(
-                                      contract.reservation_fee_paid
-                                    )}
-                                  </span>
-                                </div>
-                                <div className="border-t-2 border-blue-200 pt-4 mt-4">
-                                  <div className="flex justify-between items-center mb-4">
-                                    <span className="text-sm font-semibold text-gray-700">
-                                      Remaining Balance
-                                    </span>
-                                    <span className="font-bold text-red-600 text-xl">
-                                      {formatCurrency(
-                                        contract.remaining_balance
-                                      )}
-                                    </span>
-                                  </div>
-                                </div>
-                                <div className="flex justify-between items-center bg-white/60 backdrop-blur-sm p-3 rounded-lg">
-                                  <span className="text-sm font-medium text-gray-600">
-                                    Payment Plan
-                                  </span>
-                                  <span className="font-bold text-blue-700">
-                                    {contract.payment_plan_months} months
-                                  </span>
-                                </div>
-                                <div className="flex justify-between items-center bg-white/60 backdrop-blur-sm p-3 rounded-lg">
-                                  <span className="text-sm font-medium text-gray-600">
-                                    Monthly Payment
-                                  </span>
-                                  <span className="font-bold text-blue-900 text-lg">
-                                    {formatCurrency(
-                                      contract.monthly_installment
-                                    )}
-                                  </span>
-                                </div>
-                              </div>
-
-                              {/* Payment Progress */}
-                              {contract.statistics && (
-                                <div className="bg-white/70 backdrop-blur-sm rounded-xl p-4 mb-4">
-                                  <div className="flex justify-between text-sm text-gray-700 mb-3 font-medium">
-                                    <span>Payment Progress</span>
-                                    <span className="font-bold text-blue-600">
-                                      {
-                                        contract.statistics
-                                          .payment_progress_percent
-                                      }
-                                      %
-                                    </span>
-                                  </div>
-                                  <div className="w-full bg-blue-200 rounded-full h-3 overflow-hidden">
-                                    <div
-                                      className="bg-gradient-to-r from-blue-500 to-blue-600 h-3 rounded-full transition-all duration-500 shadow-sm"
-                                      style={{
-                                        width: `${contract.statistics.payment_progress_percent}%`,
-                                      }}
-                                    ></div>
-                                  </div>
-                                  <div className="flex justify-between text-sm text-gray-600 mt-3">
-                                    <span className="font-medium">
-                                      {contract.statistics.paid_installments} of{" "}
-                                      {contract.statistics.total_installments}{" "}
-                                      paid
-                                    </span>
-                                    {contract.statistics.overdue_installments >
-                                      0 && (
-                                      <span className="text-red-600 font-bold">
-                                        {
-                                          contract.statistics
-                                            .overdue_installments
-                                        }{" "}
-                                        overdue
-                                      </span>
-                                    )}
-                                  </div>
-                                </div>
-                              )}
-
-                              {/* View Details Button */}
-                              <Button
-                                onClick={() => handleViewDetails(contract)}
-                                className="w-full h-12 text-base font-semibold shadow-md hover:shadow-lg transition-all"
-                                variant="default"
-                              >
-                                <FileText className="w-5 h-5 mr-2" />
-                                View Full Details
-                              </Button>
-                            </div>
-                          </div>
-                        </CardContent>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </Card>
-              </motion.div>
-            );
-          })}
-        </div>
-      )}
+                      {/* Action Column */}
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-2 justify-center">
+                          <Button
+                            size="sm"
+                            onClick={() => handleViewDetails(contract)}
+                            className="bg-white hover:bg-gray-50 text-gray-700 border border-gray-300 shadow-sm"
+                          >
+                            <Eye className="w-4 h-4 mr-2" />
+                            View
+                          </Button>
+                          <Button
+                            size="sm"
+                            onClick={() => handleTransferContract(contract)}
+                            className="bg-blue-600 hover:bg-blue-700 text-white shadow-sm"
+                            disabled={contract.contract_status === 'cancelled' || contract.contract_status === 'completed'}
+                          >
+                            <ArrowRightLeft className="w-4 h-4 mr-2" />
+                            Transfer
+                          </Button>
+                        </div>
+                      </td>
+                    </motion.tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Detail Modal */}
       <AnimatePresence>
@@ -811,19 +443,20 @@ export default function CertifiedHomeOwner() {
             onClick={() => setShowDetailModal(false)}
           >
             <motion.div
-              className="bg-white rounded-lg max-w-5xl w-full max-h-[90vh] overflow-y-auto"
+              className="bg-white rounded-2xl max-w-6xl w-full max-h-[90vh] overflow-y-auto shadow-2xl"
               initial={{ scale: 0.9, y: 50 }}
               animate={{ scale: 1, y: 0 }}
               exit={{ scale: 0.9, y: 50 }}
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="p-6 border-b sticky top-0 bg-white z-10">
+              {/* Modal Header */}
+              <div className="p-6 border-b bg-gradient-to-r from-red-500 to-red-600 sticky top-0 z-10 rounded-t-2xl">
                 <div className="flex justify-between items-start">
                   <div>
-                    <h2 className="text-2xl font-bold text-gray-900 mb-2">
+                    <h2 className="text-2xl font-bold text-white mb-2">
                       Contract Details
                     </h2>
-                    <p className="text-3xl font-bold text-blue-600">
+                    <p className="text-3xl font-bold text-white opacity-90">
                       {selectedContract.contract_number}
                     </p>
                   </div>
@@ -831,17 +464,93 @@ export default function CertifiedHomeOwner() {
                     variant="ghost"
                     size="sm"
                     onClick={() => setShowDetailModal(false)}
+                    className="text-white hover:bg-white/20"
                   >
-                    <XCircle className="w-5 h-5" />
+                    <XCircle className="w-6 h-6" />
                   </Button>
                 </div>
               </div>
 
-              <div className="p-6">
-                {/* Contract Information */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+              <div className="p-8">
+                {/* Transfer History Information */}
+                {selectedContract.transfer_history && (
+                  <Card className="mb-6 border-l-4 border-l-blue-500 bg-blue-50 shadow-md">
+                    <CardContent className="p-6">
+                      <div className="flex items-start gap-4">
+                        <div className="p-3 bg-blue-100 rounded-lg">
+                          <RefreshCw className="w-6 h-6 text-blue-600" />
+                        </div>
+                        <div className="flex-1">
+                          <div className="flex items-center justify-between mb-3">
+                            <div className="flex items-center gap-3">
+                              <h3 className="text-lg font-bold text-blue-900">
+                                Contract Transferred
+                              </h3>
+                              <Badge className="bg-blue-200 text-blue-800">
+                                {formatDate(selectedContract.transfer_history.transferred_at)}
+                              </Badge>
+                            </div>
+                            <Button
+                              size="sm"
+                              onClick={() => handleRevertTransfer(selectedContract)}
+                              className="bg-amber-600 hover:bg-amber-700 text-white"
+                            >
+                              <Undo2 className="w-4 h-4 mr-2" />
+                              Revert Transfer
+                            </Button>
+                          </div>
+                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                            <div>
+                              <span className="text-xs font-semibold text-blue-700 uppercase">
+                                Previous Owner
+                              </span>
+                              <p className="font-semibold text-blue-900 mt-1">
+                                {selectedContract.transfer_history.original_client_name}
+                              </p>
+                              <p className="text-sm text-blue-700">
+                                {selectedContract.transfer_history.original_client_email}
+                              </p>
+                              <p className="text-sm text-blue-700">
+                                {selectedContract.transfer_history.original_client_phone}
+                              </p>
+                            </div>
+                            <div>
+                              <span className="text-xs font-semibold text-blue-700 uppercase">
+                                Relationship
+                              </span>
+                              <p className="font-semibold text-blue-900 mt-1 capitalize">
+                                {selectedContract.transfer_history.relationship?.replace(/_/g, ' ') || 'N/A'}
+                              </p>
+                            </div>
+                            <div>
+                              <span className="text-xs font-semibold text-blue-700 uppercase">
+                                Transfer Reason
+                              </span>
+                              <p className="font-semibold text-blue-900 mt-1">
+                                {selectedContract.transfer_history.transfer_reason}
+                              </p>
+                            </div>
+                            {selectedContract.transfer_history.transfer_notes && (
+                              <div className="md:col-span-2 lg:col-span-3">
+                                <span className="text-xs font-semibold text-blue-700 uppercase">
+                                  Additional Notes
+                                </span>
+                                <p className="text-blue-900 mt-1 italic">
+                                  {selectedContract.transfer_history.transfer_notes}
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Client & Property Info Grid */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
                   {/* Client Information */}
-                  <Card className="border-l-4 border-l-blue-500 shadow-sm hover:shadow-md transition-shadow">
+                  <Card className="border-l-4 border-l-blue-500 shadow-md">
                     <CardContent className="p-6">
                       <h3 className="text-lg font-bold text-gray-900 mb-5 flex items-center gap-3">
                         <div className="p-2 bg-blue-100 rounded-lg">
@@ -879,7 +588,7 @@ export default function CertifiedHomeOwner() {
                             Address
                           </span>
                           <p className="font-medium text-gray-700 mt-1.5 leading-relaxed">
-                            {selectedContract.client_address}
+                            {selectedContract.client_address || "N/A"}
                           </p>
                         </div>
                       </div>
@@ -887,7 +596,7 @@ export default function CertifiedHomeOwner() {
                   </Card>
 
                   {/* Property Information */}
-                  <Card className="border-l-4 border-l-green-500 shadow-sm hover:shadow-md transition-shadow">
+                  <Card className="border-l-4 border-l-green-500 shadow-md">
                     <CardContent className="p-6">
                       <h3 className="text-lg font-bold text-gray-900 mb-5 flex items-center gap-3">
                         <div className="p-2 bg-green-100 rounded-lg">
@@ -908,8 +617,16 @@ export default function CertifiedHomeOwner() {
                           <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">
                             Total Price
                           </span>
-                          <p className="font-bold text-green-600 text-2xl mt-2">
+                          <p className="font-bold text-green-600 text-3xl mt-2">
                             {formatCurrency(selectedContract.property_price)}
+                          </p>
+                        </div>
+                        <div className="pt-3 border-t border-gray-100">
+                          <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+                            Remaining Balance
+                          </span>
+                          <p className="font-bold text-red-600 text-2xl mt-2">
+                            {formatCurrency(selectedContract.remaining_balance)}
                           </p>
                         </div>
                       </div>
@@ -918,7 +635,7 @@ export default function CertifiedHomeOwner() {
                 </div>
 
                 {/* Payment Structure */}
-                <Card className="mb-8 shadow-sm">
+                <Card className="mb-8 shadow-md">
                   <CardContent className="p-6">
                     <h3 className="text-lg font-bold text-gray-900 mb-6 flex items-center gap-3">
                       <div className="p-2 bg-indigo-100 rounded-lg">
@@ -950,7 +667,7 @@ export default function CertifiedHomeOwner() {
                           </div>
                           <div className="flex justify-between items-center">
                             <span className="text-sm text-gray-600">
-                              Remaining Balance
+                              Remaining
                             </span>
                             <span className="text-sm text-red-600 font-bold">
                               {formatCurrency(
@@ -1016,7 +733,7 @@ export default function CertifiedHomeOwner() {
                 {/* Payment Schedule */}
                 {selectedContract.payment_schedules &&
                   selectedContract.payment_schedules.length > 0 && (
-                    <Card className="shadow-sm">
+                    <Card className="shadow-md">
                       <CardContent className="p-6">
                         <div className="flex items-start justify-between mb-6">
                           <div className="flex items-center gap-3">
@@ -1028,8 +745,7 @@ export default function CertifiedHomeOwner() {
                                 Payment Schedule
                               </h3>
                               <p className="text-xs text-gray-600 mt-1">
-                                Process walk-in payments directly from this
-                                table
+                                Track all installment payments
                               </p>
                             </div>
                           </div>
@@ -1039,50 +755,30 @@ export default function CertifiedHomeOwner() {
                           </Badge>
                         </div>
 
-                        {/* Walk-in Payment Info Banner */}
-                        <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6 flex items-start gap-3">
-                          <div className="p-1.5 bg-green-100 rounded-lg mt-0.5">
-                            <CreditCard className="w-4 h-4 text-green-600" />
-                          </div>
-                          <div className="flex-1">
-                            <h4 className="text-sm font-semibold text-green-900 mb-1">
-                              Walk-in Payment Available
-                            </h4>
-                            <p className="text-xs text-green-700 leading-relaxed">
-                              Click the <strong>"Pay"</strong> button on any
-                              pending installment to process walk-in payments
-                              for clients who visit in person.
-                            </p>
-                          </div>
-                        </div>
-
-                        <div className="overflow-x-auto -mx-2">
+                        <div className="overflow-x-auto">
                           <table className="w-full">
                             <thead>
-                              <tr className="border-b-2 border-gray-200">
-                                <th className="text-left px-4 py-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                              <tr className="border-b-2 border-gray-200 bg-gray-50">
+                                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-600 uppercase tracking-wider">
                                   #
                                 </th>
-                                <th className="text-left px-4 py-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-600 uppercase tracking-wider">
                                   Description
                                 </th>
-                                <th className="text-left px-4 py-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-600 uppercase tracking-wider">
                                   Due Date
                                 </th>
-                                <th className="text-right px-4 py-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                                <th className="text-right px-4 py-3 text-xs font-semibold text-gray-600 uppercase tracking-wider">
                                   Amount
                                 </th>
-                                <th className="text-right px-4 py-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                                <th className="text-right px-4 py-3 text-xs font-semibold text-gray-600 uppercase tracking-wider">
                                   Paid
                                 </th>
-                                <th className="text-right px-4 py-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                                <th className="text-right px-4 py-3 text-xs font-semibold text-gray-600 uppercase tracking-wider">
                                   Remaining
                                 </th>
-                                <th className="text-center px-4 py-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                                <th className="text-center px-4 py-3 text-xs font-semibold text-gray-600 uppercase tracking-wider">
                                   Status
-                                </th>
-                                <th className="text-center px-4 py-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">
-                                  Action
                                 </th>
                               </tr>
                             </thead>
@@ -1121,37 +817,15 @@ export default function CertifiedHomeOwner() {
                                       <Badge
                                         className={
                                           schedule.payment_status === "paid"
-                                            ? "bg-green-100 text-green-800 font-medium px-3 py-1"
+                                            ? "bg-green-100 text-green-800 font-medium px-3 py-1 border border-green-200"
                                             : schedule.is_overdue
-                                            ? "bg-red-100 text-red-800 font-medium px-3 py-1"
-                                            : "bg-yellow-100 text-yellow-800 font-medium px-3 py-1"
+                                            ? "bg-red-100 text-red-800 font-medium px-3 py-1 border border-red-200"
+                                            : "bg-yellow-100 text-yellow-800 font-medium px-3 py-1 border border-yellow-200"
                                         }
                                       >
                                         {schedule.payment_status}
                                       </Badge>
                                     </td>
-                                    {/* <td className="px-4 py-4 text-center">
-                                      {schedule.payment_status !== "paid" &&
-                                      schedule.remaining_amount > 0 ? (
-                                        <Button
-                                          size="sm"
-                                          onClick={() =>
-                                            handleWalkInPayment(
-                                              schedule,
-                                              selectedContract
-                                            )
-                                          }
-                                          className="bg-green-600 hover:bg-green-700 text-white font-medium px-4 py-2 shadow-sm"
-                                        >
-                                          <CreditCard className="w-4 h-4 mr-1.5" />
-                                          Pay
-                                        </Button>
-                                      ) : (
-                                        <span className="text-xs text-gray-400 font-medium">
-                                          —
-                                        </span>
-                                      )}
-                                    </td> */}
                                   </tr>
                                 )
                               )}
@@ -1161,52 +835,6 @@ export default function CertifiedHomeOwner() {
                       </CardContent>
                     </Card>
                   )}
-
-                {/* Contract Dates */}
-                <Card className="mt-8 shadow-sm">
-                  <CardContent className="p-6">
-                    <h3 className="text-lg font-bold text-gray-900 mb-6 flex items-center gap-3">
-                      <div className="p-2 bg-teal-100 rounded-lg">
-                        <Calendar className="w-5 h-5 text-teal-600" />
-                      </div>
-                      Important Dates
-                    </h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                      <div className="bg-gradient-to-br from-teal-50 to-teal-100/30 p-4 rounded-lg border border-teal-200">
-                        <p className="text-xs font-semibold text-teal-600 mb-2 uppercase tracking-wide">
-                          Contract Signed
-                        </p>
-                        <p className="font-bold text-gray-900 text-lg">
-                          {formatDate(selectedContract.contract_signed_date)}
-                        </p>
-                      </div>
-                      <div className="bg-gradient-to-br from-blue-50 to-blue-100/30 p-4 rounded-lg border border-blue-200">
-                        <p className="text-xs font-semibold text-blue-600 mb-2 uppercase tracking-wide">
-                          First Installment
-                        </p>
-                        <p className="font-bold text-gray-900 text-lg">
-                          {formatDate(selectedContract.first_installment_date)}
-                        </p>
-                      </div>
-                      <div className="bg-gradient-to-br from-orange-50 to-orange-100/30 p-4 rounded-lg border border-orange-200">
-                        <p className="text-xs font-semibold text-orange-600 mb-2 uppercase tracking-wide">
-                          Final Installment
-                        </p>
-                        <p className="font-bold text-gray-900 text-lg">
-                          {formatDate(selectedContract.final_installment_date)}
-                        </p>
-                      </div>
-                      <div className="bg-gradient-to-br from-gray-50 to-gray-100/30 p-4 rounded-lg border border-gray-200">
-                        <p className="text-xs font-semibold text-gray-600 mb-2 uppercase tracking-wide">
-                          Created Date
-                        </p>
-                        <p className="font-bold text-gray-900 text-lg">
-                          {formatDate(selectedContract.created_at)}
-                        </p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
               </div>
             </motion.div>
           </motion.div>
@@ -1221,6 +849,154 @@ export default function CertifiedHomeOwner() {
         contract={paymentContract}
         onPaymentSuccess={handlePaymentSuccess}
       />
+
+      {/* Transfer Contract Modal */}
+      <TransferContractModal
+        isOpen={showTransferModal}
+        onClose={() => setShowTransferModal(false)}
+        contract={transferContract}
+        onTransferSuccess={handleTransferSuccess}
+      />
+
+      {/* Revert Transfer Confirmation Modal */}
+      <AnimatePresence>
+        {showRevertModal && revertContract && (
+          <motion.div
+            className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => !revertLoading && setShowRevertModal(false)}
+          >
+            <motion.div
+              className="bg-white rounded-2xl max-w-2xl w-full shadow-2xl"
+              initial={{ scale: 0.9, y: 50 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.9, y: 50 }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Modal Header */}
+              <div className="p-6 border-b bg-gradient-to-r from-amber-500 to-amber-600 rounded-t-2xl">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-white/20 rounded-lg">
+                    <Undo2 className="w-6 h-6 text-white" />
+                  </div>
+                  <div>
+                    <h2 className="text-2xl font-bold text-white">
+                      Revert Contract Transfer
+                    </h2>
+                    <p className="text-amber-100 text-sm mt-1">
+                      This will restore the contract to the original owner
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-6">
+                {/* Warning Card */}
+                <Card className="mb-6 border-l-4 border-l-amber-500 bg-amber-50">
+                  <CardContent className="p-4">
+                    <div className="flex items-start gap-3">
+                      <AlertCircle className="w-5 h-5 text-amber-600 mt-0.5" />
+                      <div>
+                        <h4 className="font-semibold text-amber-900 mb-1">
+                          Important: This action will undo the transfer
+                        </h4>
+                        <p className="text-sm text-amber-800">
+                          The contract will be returned to the original owner and the transfer history record will be deleted. This action cannot be undone.
+                        </p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Current Information */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                  <Card className="border-l-4 border-l-blue-500">
+                    <CardContent className="p-4">
+                      <h4 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                        <User className="w-4 h-4 text-blue-600" />
+                        Current Owner (New)
+                      </h4>
+                      <p className="font-semibold text-gray-900">{revertContract.client_name}</p>
+                      <p className="text-sm text-gray-600">{revertContract.client_email}</p>
+                    </CardContent>
+                  </Card>
+
+                  <Card className="border-l-4 border-l-green-500">
+                    <CardContent className="p-4">
+                      <h4 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                        <Undo2 className="w-4 h-4 text-green-600" />
+                        Will Revert To (Original)
+                      </h4>
+                      <p className="font-semibold text-gray-900">
+                        {revertContract.transfer_history?.original_client_name}
+                      </p>
+                      <p className="text-sm text-gray-600">
+                        {revertContract.transfer_history?.original_client_email}
+                      </p>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                {/* Transfer Details */}
+                <Card className="mb-6 bg-gray-50">
+                  <CardContent className="p-4">
+                    <h4 className="font-semibold text-gray-900 mb-2">Transfer Details</h4>
+                    <div className="grid grid-cols-2 gap-3 text-sm">
+                      <div>
+                        <span className="text-gray-600">Contract:</span>
+                        <span className="ml-2 font-mono font-semibold">{revertContract.contract_number}</span>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">Property:</span>
+                        <span className="ml-2 font-semibold">{revertContract.property_title}</span>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">Transferred:</span>
+                        <span className="ml-2">{formatDate(revertContract.transfer_history?.transferred_at)}</span>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">Reason:</span>
+                        <span className="ml-2">{revertContract.transfer_history?.transfer_reason}</span>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Action Buttons */}
+                <div className="flex justify-end gap-3">
+                  <Button
+                    variant="outline"
+                    onClick={() => setShowRevertModal(false)}
+                    disabled={revertLoading}
+                    className="px-6"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={confirmRevertTransfer}
+                    disabled={revertLoading}
+                    className="bg-amber-600 hover:bg-amber-700 text-white px-6"
+                  >
+                    {revertLoading ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Reverting...
+                      </>
+                    ) : (
+                      <>
+                        <Undo2 className="w-4 h-4 mr-2" />
+                        Revert Transfer
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
+import { createNotification, NotificationTemplates } from "@/lib/notification-helper";
 
 // Function to create Supabase admin client safely
 function createSupabaseAdmin() {
@@ -47,10 +48,10 @@ export async function POST(request) {
       );
     }
 
-    // Check if reservation exists and is approved
+    // Check if reservation exists and can be reverted (get full details for notification)
     const { data: existingReservation, error: fetchError } = await supabaseAdmin
       .from("property_reservations")
-      .select("status")
+      .select("*")
       .eq("reservation_id", reservation_id)
       .single();
 
@@ -66,12 +67,13 @@ export async function POST(request) {
       );
     }
 
-    if (existingReservation.status !== "approved") {
+    // Allow reverting both approved and rejected reservations
+    if (existingReservation.status !== "approved" && existingReservation.status !== "rejected") {
       return NextResponse.json(
         {
           success: false,
           error: "Invalid status",
-          message: "Only approved reservations can be reverted to pending",
+          message: "Only approved or rejected reservations can be reverted to pending",
         },
         { status: 400 }
       );
@@ -101,6 +103,28 @@ export async function POST(request) {
     }
 
     console.log("✅ Reservation reverted to pending successfully:", reservation_id);
+
+    // Send notification to the client
+    try {
+      await createNotification(supabaseAdmin, {
+        ...NotificationTemplates.RESERVATION_REVERTED({
+          reservationId: existingReservation.reservation_id,
+          trackingNumber: existingReservation.tracking_number,
+          propertyId: existingReservation.property_id,
+          propertyTitle: existingReservation.property_title,
+          clientName: existingReservation.client_name,
+          clientEmail: existingReservation.client_email,
+          reservationFee: existingReservation.reservation_fee,
+          status: "pending",
+        }),
+        recipientId: existingReservation.user_id, // Send to specific client
+        recipientRole: null, // Override role-based targeting
+      });
+      console.log(`✅ Revert notification sent to user: ${existingReservation.user_id}`);
+    } catch (notificationError) {
+      console.error("❌ Exception creating notification:", notificationError);
+      // Don't fail the revert if notification fails
+    }
 
     // Delete any associated pending transactions
     const { error: deleteTransactionError } = await supabaseAdmin

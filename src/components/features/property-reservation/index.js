@@ -1865,6 +1865,26 @@ export default function ReservationDetails() {
                               </Button>
                             </>
                           )}
+                          {reservation.status === "rejected" && (
+                            <>
+                              <Button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleRevert(reservation.reservation_id);
+                                }}
+                                disabled={
+                                  processingId === reservation.reservation_id
+                                }
+                                className="bg-orange-600 hover:bg-orange-700 text-white px-3 py-1 text-xs"
+                              >
+                                {processingId === reservation.reservation_id ? (
+                                  <Loader2 className="h-3 w-3 animate-spin" />
+                                ) : (
+                                  <RotateCcw className="h-3 w-3" />
+                                )}
+                              </Button>
+                            </>
+                          )}
                         </div>
                       </td>
                     </motion.tr>
@@ -2219,6 +2239,27 @@ export default function ReservationDetails() {
                     >
                       <Printer className="mr-2 h-4 w-4" />
                       Print Receipt
+                    </Button>
+                  </div>
+                )}
+
+                {selectedReservation.status === "rejected" && (
+                  <div className="flex gap-4 pt-6 border-t">
+                    <Button
+                      onClick={() =>
+                        handleRevert(selectedReservation.reservation_id)
+                      }
+                      disabled={
+                        processingId === selectedReservation.reservation_id
+                      }
+                      className="flex-1 bg-orange-600 hover:bg-orange-700 text-white"
+                    >
+                      {processingId === selectedReservation.reservation_id ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <RotateCcw className="mr-2 h-4 w-4" />
+                      )}
+                      Revert to Pending
                     </Button>
                   </div>
                 )}
