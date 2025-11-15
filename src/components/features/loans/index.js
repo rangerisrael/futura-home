@@ -657,16 +657,19 @@ export default function Loans() {
                                 Due Date
                               </th>
                               <th className="text-right px-4 py-3 text-xs font-semibold text-gray-600 uppercase">
-                                Amount
+                                Scheduled
                               </th>
-                              <th className="text-right px-4 py-3 text-xs font-semibold text-gray-600 uppercase">
+                              <th className="text-right px-4 py-3 text-xs font-semibold text-green-600 uppercase">
                                 Paid
+                              </th>
+                              <th className="text-right px-4 py-3 text-xs font-semibold text-blue-600 uppercase">
+                                Remaining
                               </th>
                               <th className="text-right px-4 py-3 text-xs font-semibold text-orange-600 uppercase">
                                 Penalty
                               </th>
-                              <th className="text-right px-4 py-3 text-xs font-semibold text-gray-600 uppercase">
-                                Balance
+                              <th className="text-right px-4 py-3 text-xs font-semibold text-red-600 uppercase">
+                                Running Balance
                               </th>
                               <th className="text-center px-4 py-3 text-xs font-semibold text-gray-600 uppercase">
                                 Status
@@ -709,7 +712,20 @@ export default function Loans() {
                                     {formatCurrency(schedule.scheduled_amount)}
                                   </td>
                                   <td className="px-4 py-3 text-right text-green-600 font-semibold">
-                                    {formatCurrency(schedule.paid_amount)}
+                                    {formatCurrency(schedule.paid_amount || 0)}
+                                  </td>
+                                  <td className="px-4 py-3 text-right font-semibold">
+                                    <span className={
+                                      parseFloat(schedule.remaining_amount || 0) <= 0
+                                        ? "text-gray-400"
+                                        : parseFloat(schedule.remaining_amount || 0) >= parseFloat(schedule.scheduled_amount || 0)
+                                        ? "text-blue-600"
+                                        : "text-orange-600"
+                                    }>
+                                      {parseFloat(schedule.remaining_amount || 0) <= 0
+                                        ? "—"
+                                        : formatCurrency(schedule.remaining_amount)}
+                                    </span>
                                   </td>
                                   <td className="px-4 py-3 text-right text-orange-600 font-semibold">
                                     {schedule.penalty_amount > 0 ? formatCurrency(schedule.penalty_amount) : "—"}
@@ -722,6 +738,8 @@ export default function Loans() {
                                       className={
                                         schedule.payment_status === "paid"
                                           ? "bg-green-100 text-green-800"
+                                          : schedule.payment_status === "partial"
+                                          ? "bg-blue-100 text-blue-800"
                                           : schedule.is_overdue
                                           ? "bg-red-100 text-red-800"
                                           : "bg-yellow-100 text-yellow-800"
@@ -731,6 +749,11 @@ export default function Loans() {
                                         <>
                                           <CheckCircle className="w-3 h-3 mr-1 inline" />
                                           Paid
+                                        </>
+                                      ) : schedule.payment_status === "partial" ? (
+                                        <>
+                                          <DollarSign className="w-3 h-3 mr-1 inline" />
+                                          Partial
                                         </>
                                       ) : schedule.is_overdue ? (
                                         <>

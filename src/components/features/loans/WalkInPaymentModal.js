@@ -27,6 +27,9 @@ export default function WalkInPaymentModal({
   const [calculatedPenalty, setCalculatedPenalty] = useState(0);
   const [daysOverdue, setDaysOverdue] = useState(0);
   const [gracePeriodEnd, setGracePeriodEnd] = useState(null);
+  const [paymentType, setPaymentType] = useState("full"); // 'full', 'monthly', 'weekly', 'daily', 'partial'
+  const [customAmount, setCustomAmount] = useState(0);
+  const [errorModal, setErrorModal] = useState({ show: false, title: "", message: "" });
   const [paymentData, setPaymentData] = useState({
     amount_paid: 0,
     penalty_paid: 0,
@@ -47,6 +50,9 @@ export default function WalkInPaymentModal({
       setCalculatedPenalty(0);
       setDaysOverdue(0);
       setGracePeriodEnd(null);
+      setPaymentType("full");
+      setCustomAmount(0);
+      setErrorModal({ show: false, title: "", message: "" });
       setPaymentData({
         amount_paid: 0,
         penalty_paid: 0,
@@ -115,6 +121,64 @@ export default function WalkInPaymentModal({
     })}`;
   };
 
+  // Calculate payment amount based on selected type
+  const calculatePaymentAmount = () => {
+    const remaining = parseFloat(schedule?.remaining_amount || 0);
+    const monthlyInstallment = parseFloat(contract?.monthly_installment || 0);
+
+    switch(paymentType) {
+      case 'full':
+        return remaining; // Pay entire remaining amount
+
+      case 'monthly':
+        // Pay one month's installment (or remaining if less)
+        return Math.min(monthlyInstallment, remaining);
+
+      case 'weekly':
+        // Calculate weekly amount (monthly ÷ 4.33)
+        const weeklyAmount = monthlyInstallment / 4.33;
+        return Math.min(weeklyAmount, remaining);
+
+      case 'daily':
+        // Calculate daily amount (monthly ÷ 30)
+        const dailyAmount = monthlyInstallment / 30;
+        return Math.min(dailyAmount, remaining);
+
+      case 'partial':
+        // Custom amount - must be >= 10% of monthly installment
+        const amount = parseFloat(customAmount || 0);
+        return Math.min(amount, remaining);
+
+      default:
+        return remaining;
+    }
+  };
+
+  // Validate payment amount
+  const validatePayment = () => {
+    const amount = calculatePaymentAmount();
+    const remaining = parseFloat(schedule?.remaining_amount || 0);
+    const monthlyInstallment = parseFloat(contract?.monthly_installment || 0);
+    const minAmount = monthlyInstallment * 0.1; // 10% minimum
+
+    if (amount <= 0) {
+      return { valid: false, error: "Payment amount must be greater than zero" };
+    }
+
+    if (amount > remaining) {
+      return { valid: false, error: "Payment exceeds remaining balance" };
+    }
+
+    if (paymentType === 'partial' && amount < minAmount) {
+      return {
+        valid: false,
+        error: `Minimum partial payment is ${formatCurrency(minAmount)}`
+      };
+    }
+
+    return { valid: true };
+  };
+
   const handleInputChange = (field, value) => {
     setPaymentData((prev) => ({
       ...prev,
@@ -124,42 +188,47 @@ export default function WalkInPaymentModal({
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+
+    // Validate payment
+    const validation = validatePayment();
+    if (!validation.valid) {
+      setErrorModal({
+        show: true,
+        title: "Validation Error",
+        message: validation.error
+      });
+      return;
+    }
+
     setLoading(true);
 
-    // FORCE base amount to be exactly the remaining amount (never use user input)
-    const remainingAmount = parseFloat(schedule.remaining_amount || 0);
-    const amountPaid = remainingAmount; // Always pay the exact remaining amount
-    const penaltyPaid = parseFloat(calculatedPenalty || 0); // Use the calculated penalty
+    // Calculate payment amount based on selected type
+    const amountPaid = calculatePaymentAmount();
+    const penaltyPaid = parseFloat(calculatedPenalty || 0);
     const totalPayment = amountPaid + penaltyPaid;
 
     console.log("💳 Submitting payment:", {
+      payment_type: paymentType,
       amount_paid: amountPaid,
       penalty_paid: penaltyPaid,
       total_payment: totalPayment,
-      remaining_amount: remainingAmount,
+      remaining_amount: parseFloat(schedule.remaining_amount || 0),
       calculated_penalty: calculatedPenalty,
-      expected_total: remainingAmount + calculatedPenalty,
     });
-
-    // Client-side validation
-    if (remainingAmount <= 0) {
-      alert("❌ ERROR: No remaining amount to pay.");
-      setLoading(false);
-      return;
-    }
 
     try {
       const payloadData = {
         schedule_id: schedule.schedule_id,
         contract_id: contract.contract_id,
-        amount_paid: amountPaid, // This is always equal to remainingAmount
-        penalty_paid: penaltyPaid, // This is always equal to calculatedPenalty
+        payment_type: paymentType, // NEW: payment type
+        amount_paid: amountPaid, // Calculated based on payment type
+        penalty_paid: penaltyPaid,
         payment_method: paymentData.payment_method,
         reference_number: paymentData.reference_number || null,
         check_number: paymentData.check_number || null,
         bank_name: paymentData.bank_name || null,
         processed_by_name: paymentData.processed_by_name || "Admin",
-        notes: paymentData.notes || null,
+        notes: `${paymentType.toUpperCase()} payment - ${paymentData.notes || ''}`.trim(),
       };
 
       console.log("📤 Sending payload to API:", payloadData);
@@ -182,11 +251,19 @@ export default function WalkInPaymentModal({
         onClose();
       } else {
         console.error("❌ Payment failed:", result.error);
-        alert(`❌ Payment Failed:\n\n${result.error || "Failed to process payment"}`);
+        setErrorModal({
+          show: true,
+          title: "Payment Failed",
+          message: result.error || "Failed to process payment. Please try again."
+        });
       }
     } catch (error) {
       console.error("❌ Payment error:", error);
-      alert(`❌ Network Error:\n\nFailed to process payment. Please check your connection and try again.\n\nError: ${error.message}`);
+      setErrorModal({
+        show: true,
+        title: "Network Error",
+        message: `Failed to process payment. Please check your connection and try again.\n\nError: ${error.message}`
+      });
     } finally {
       setLoading(false);
     }
@@ -194,14 +271,15 @@ export default function WalkInPaymentModal({
 
   if (!isOpen || !schedule || !contract) return null;
 
-  // Use schedule values directly for validation (not paymentData)
-  const baseAmount = parseFloat(schedule?.remaining_amount || 0);
+  // Calculate amounts based on payment type
+  const baseAmount = calculatePaymentAmount();
   const penaltyAmount = parseFloat(calculatedPenalty || 0);
   const totalPayment = baseAmount + penaltyAmount;
-  const expectedTotal = baseAmount + penaltyAmount;
+  const remainingAfterPayment = parseFloat(schedule?.remaining_amount || 0) - baseAmount;
 
   // Check if amounts are valid for submission
-  const isValidPayment = baseAmount > 0 && schedule?.remaining_amount;
+  const validation = validatePayment();
+  const isValidPayment = validation.valid && baseAmount > 0;
 
   return (
     <AnimatePresence>
@@ -298,6 +376,218 @@ export default function WalkInPaymentModal({
                 </CardContent>
               </Card>
 
+              {/* Payment Type Selection */}
+              <div className="mb-6">
+                <label className="block text-sm font-semibold text-gray-700 mb-3">
+                  Payment Type <span className="text-red-500">*</span>
+                </label>
+
+                <div className="space-y-2">
+                  {/* Full Payment */}
+                  <div
+                    className={`border-2 rounded-lg p-3 cursor-pointer transition-all ${
+                      paymentType === 'full'
+                        ? 'border-green-500 bg-green-50'
+                        : 'border-gray-200 hover:border-gray-300'
+                    }`}
+                    onClick={() => setPaymentType('full')}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="radio"
+                          checked={paymentType === 'full'}
+                          onChange={() => setPaymentType('full')}
+                          className="w-4 h-4"
+                        />
+                        <div>
+                          <p className="font-semibold text-gray-900">Full Payment</p>
+                          <p className="text-xs text-gray-600">Pay entire remaining balance</p>
+                        </div>
+                      </div>
+                      <p className="font-bold text-green-700">
+                        {formatCurrency(schedule.remaining_amount)}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Monthly Payment */}
+                  <div
+                    className={`border-2 rounded-lg p-3 cursor-pointer transition-all ${
+                      paymentType === 'monthly'
+                        ? 'border-blue-500 bg-blue-50'
+                        : 'border-gray-200 hover:border-gray-300'
+                    }`}
+                    onClick={() => setPaymentType('monthly')}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="radio"
+                          checked={paymentType === 'monthly'}
+                          onChange={() => setPaymentType('monthly')}
+                          className="w-4 h-4"
+                        />
+                        <div>
+                          <p className="font-semibold text-gray-900">Monthly Installment</p>
+                          <p className="text-xs text-gray-600">Pay one month's amount</p>
+                        </div>
+                      </div>
+                      <p className="font-bold text-blue-700">
+                        {formatCurrency(Math.min(
+                          contract.monthly_installment,
+                          schedule.remaining_amount
+                        ))}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Weekly Payment */}
+                  <div
+                    className={`border-2 rounded-lg p-3 cursor-pointer transition-all ${
+                      paymentType === 'weekly'
+                        ? 'border-purple-500 bg-purple-50'
+                        : 'border-gray-200 hover:border-gray-300'
+                    }`}
+                    onClick={() => setPaymentType('weekly')}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="radio"
+                          checked={paymentType === 'weekly'}
+                          onChange={() => setPaymentType('weekly')}
+                          className="w-4 h-4"
+                        />
+                        <div>
+                          <p className="font-semibold text-gray-900">Weekly Payment</p>
+                          <p className="text-xs text-gray-600">Pay weekly amount (~monthly ÷ 4)</p>
+                        </div>
+                      </div>
+                      <p className="font-bold text-purple-700">
+                        {formatCurrency(Math.min(
+                          contract.monthly_installment / 4.33,
+                          schedule.remaining_amount
+                        ))}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Daily Payment */}
+                  <div
+                    className={`border-2 rounded-lg p-3 cursor-pointer transition-all ${
+                      paymentType === 'daily'
+                        ? 'border-amber-500 bg-amber-50'
+                        : 'border-gray-200 hover:border-gray-300'
+                    }`}
+                    onClick={() => setPaymentType('daily')}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="radio"
+                          checked={paymentType === 'daily'}
+                          onChange={() => setPaymentType('daily')}
+                          className="w-4 h-4"
+                        />
+                        <div>
+                          <p className="font-semibold text-gray-900">Daily Payment</p>
+                          <p className="text-xs text-gray-600">Pay daily amount (~monthly ÷ 30)</p>
+                        </div>
+                      </div>
+                      <p className="font-bold text-amber-700">
+                        {formatCurrency(Math.min(
+                          contract.monthly_installment / 30,
+                          schedule.remaining_amount
+                        ))}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Partial/Custom Payment */}
+                  <div
+                    className={`border-2 rounded-lg p-3 cursor-pointer transition-all ${
+                      paymentType === 'partial'
+                        ? 'border-orange-500 bg-orange-50'
+                        : 'border-gray-200 hover:border-gray-300'
+                    }`}
+                    onClick={() => setPaymentType('partial')}
+                  >
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="radio"
+                        checked={paymentType === 'partial'}
+                        onChange={() => setPaymentType('partial')}
+                        className="w-4 h-4"
+                      />
+                      <div className="flex-1">
+                        <p className="font-semibold text-gray-900">Partial/Custom Amount</p>
+                        <p className="text-xs text-gray-600 mb-2">
+                          Enter custom amount (min: {formatCurrency(contract.monthly_installment * 0.1)})
+                        </p>
+                        {paymentType === 'partial' && (
+                          <Input
+                            type="number"
+                            step="0.01"
+                            min={contract.monthly_installment * 0.1}
+                            max={schedule.remaining_amount}
+                            value={customAmount}
+                            onChange={(e) => setCustomAmount(e.target.value)}
+                            placeholder="Enter amount"
+                            className="mt-2"
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Payment Preview Section */}
+              <div className="bg-blue-50 border-2 border-blue-300 rounded-lg p-4 mb-5">
+                <h4 className="font-bold text-blue-900 mb-3 flex items-center gap-2">
+                  <Receipt className="w-5 h-5" />
+                  Payment Preview
+                </h4>
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-blue-800">Amount to Pay:</span>
+                    <span className="font-bold text-blue-900">
+                      {formatCurrency(calculatePaymentAmount())}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-blue-800">Penalty:</span>
+                    <span className="font-bold text-orange-600">
+                      {formatCurrency(calculatedPenalty)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between border-t-2 border-blue-300 pt-2">
+                    <span className="text-blue-800 font-bold">Total Payment:</span>
+                    <span className="font-bold text-green-700 text-lg">
+                      {formatCurrency(calculatePaymentAmount() + calculatedPenalty)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between bg-white rounded p-2 mt-2">
+                    <span className="text-gray-700">Remaining After Payment:</span>
+                    <span className="font-bold text-red-600">
+                      {formatCurrency(remainingAfterPayment)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-700">New Status:</span>
+                    <Badge className={
+                      remainingAfterPayment <= 0
+                        ? "bg-green-100 text-green-800"
+                        : "bg-yellow-100 text-yellow-800"
+                    }>
+                      {remainingAfterPayment <= 0 ? "Fully Paid" : "Partially Paid"}
+                    </Badge>
+                  </div>
+                </div>
+              </div>
+
               {/* Payment Details Form */}
               <div className="space-y-5">
                 {/* Payment Amount */}
@@ -314,11 +604,11 @@ export default function WalkInPaymentModal({
                       <AlertCircle className="w-5 h-5 text-blue-700 mt-0.5 flex-shrink-0" />
                       <div>
                         <p className="text-sm font-bold text-blue-900">
-                          ℹ️ Base Amount (Automatically Set)
+                          ℹ️ Payment Amount (Based on {paymentType.charAt(0).toUpperCase() + paymentType.slice(1)} Type)
                         </p>
                         <p className="text-xs text-blue-800 mt-1">
-                          This field shows the BASE AMOUNT ONLY (₱{parseFloat(schedule.remaining_amount || 0).toFixed(2)}).
-                          Penalty (₱{calculatedPenalty.toFixed(2)}) is added separately below.
+                          Amount is calculated based on your selected payment type.
+                          Penalty (₱{calculatedPenalty.toFixed(2)}) is added separately.
                         </p>
                       </div>
                     </div>
@@ -329,7 +619,7 @@ export default function WalkInPaymentModal({
                     <Input
                       type="number"
                       step="0.01"
-                      value={paymentData.amount_paid}
+                      value={calculatePaymentAmount().toFixed(2)}
                       className="pl-10 text-lg font-semibold bg-blue-50 border-blue-300 cursor-not-allowed"
                       readOnly
                       disabled
@@ -337,31 +627,8 @@ export default function WalkInPaymentModal({
                     />
                   </div>
                   <p className="text-xs text-blue-600 font-semibold mt-2">
-                    🔒 This field is automatically calculated and cannot be edited
+                    🔒 This field is automatically calculated based on payment type
                   </p>
-
-                  <div className="grid grid-cols-2 gap-2 mt-2">
-                    <div className="bg-gray-50 border border-gray-300 rounded p-2">
-                      <p className="text-xs text-gray-500 mb-1">Base Amount</p>
-                      <p className="text-sm font-bold text-gray-900">{formatCurrency(schedule.remaining_amount)}</p>
-                    </div>
-                    {calculatedPenalty > 0 && (
-                      <div className="bg-orange-50 border border-orange-300 rounded p-2">
-                        <p className="text-xs text-orange-600 mb-1">+ Penalty (separate)</p>
-                        <p className="text-sm font-bold text-orange-700">{formatCurrency(calculatedPenalty)}</p>
-                      </div>
-                    )}
-                  </div>
-
-                  {calculatedPenalty > 0 && (
-                    <div className="bg-green-50 border border-green-300 rounded-lg p-2 mt-2">
-                      <p className="text-xs text-green-700">
-                        <span className="font-bold">Total Payment (automatically calculated):</span>
-                        <br />
-                        {formatCurrency(schedule.remaining_amount)} + {formatCurrency(calculatedPenalty)} = <span className="text-lg font-bold">{formatCurrency(parseFloat(schedule.remaining_amount || 0) + parseFloat(calculatedPenalty))}</span>
-                      </p>
-                    </div>
-                  )}
                 </div>
 
                 {/* Penalty Amount - Always Show */}
@@ -651,6 +918,61 @@ export default function WalkInPaymentModal({
                 </Button>
               </div>
             </form>
+          </motion.div>
+        </motion.div>
+      )}
+
+      {/* Error Modal */}
+      {errorModal.show && (
+        <motion.div
+          className="fixed inset-0 bg-black bg-opacity-60 z-[60] flex items-center justify-center p-4"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          onClick={() => setErrorModal({ show: false, title: "", message: "" })}
+        >
+          <motion.div
+            className="bg-white rounded-2xl max-w-md w-full shadow-2xl"
+            initial={{ scale: 0.9, y: 50 }}
+            animate={{ scale: 1, y: 0 }}
+            exit={{ scale: 0.9, y: 50 }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Error Header */}
+            <div className="bg-gradient-to-r from-red-600 to-red-700 p-6 text-white rounded-t-2xl">
+              <div className="flex items-center gap-3">
+                <div className="p-3 bg-white/20 rounded-xl">
+                  <XCircle className="w-6 h-6" />
+                </div>
+                <div>
+                  <h2 className="text-2xl font-bold">{errorModal.title}</h2>
+                  <p className="text-red-100 text-sm mt-1">Please review the error below</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Error Body */}
+            <div className="p-6">
+              <div className="bg-red-50 border-2 border-red-200 rounded-lg p-4 mb-6">
+                <div className="flex items-start gap-3">
+                  <AlertCircle className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
+                  <div className="flex-1">
+                    <p className="text-sm text-red-900 whitespace-pre-wrap">
+                      {errorModal.message}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Close Button */}
+              <Button
+                onClick={() => setErrorModal({ show: false, title: "", message: "" })}
+                className="w-full h-12 bg-red-600 hover:bg-red-700 text-white font-semibold"
+              >
+                <CheckCircle className="w-5 h-5 mr-2" />
+                Got it, Close
+              </Button>
+            </div>
           </motion.div>
         </motion.div>
       )}

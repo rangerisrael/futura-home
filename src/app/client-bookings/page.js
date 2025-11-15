@@ -906,18 +906,22 @@ export default function ClientBookingsPage() {
                                         <table className="w-full text-sm">
                                           <thead>
                                             <tr className="border-b border-slate-200 bg-slate-50">
-                                              <th className="text-left py-2 px-3 text-xs font-semibold text-slate-600">#</th>
-                                              <th className="text-left py-2 px-3 text-xs font-semibold text-slate-600">Due Date</th>
-                                              <th className="text-right py-2 px-3 text-xs font-semibold text-slate-600">Amount</th>
-                                              <th className="text-right py-2 px-3 text-xs font-semibold text-orange-600">Penalty</th>
-                                              <th className="text-center py-2 px-3 text-xs font-semibold text-slate-600">Status</th>
+                                              <th className="text-left py-2 px-3 text-xs font-semibold text-slate-600 uppercase">#</th>
+                                              <th className="text-left py-2 px-3 text-xs font-semibold text-slate-600 uppercase">Due Date</th>
+                                              <th className="text-right py-2 px-3 text-xs font-semibold text-slate-600 uppercase">Scheduled</th>
+                                              <th className="text-right py-2 px-3 text-xs font-semibold text-green-600 uppercase">Paid</th>
+                                              <th className="text-right py-2 px-3 text-xs font-semibold text-blue-600 uppercase">Remaining</th>
+                                              <th className="text-right py-2 px-3 text-xs font-semibold text-orange-600 uppercase">Penalty</th>
+                                              <th className="text-center py-2 px-3 text-xs font-semibold text-slate-600 uppercase">Status</th>
                                             </tr>
                                           </thead>
                                           <tbody className="divide-y divide-slate-100">
                                             {reservation.payment_schedules.map((schedule) => (
                                               <tr key={schedule.schedule_id} className="hover:bg-slate-50">
-                                                <td className="py-2 px-3 font-medium text-slate-900">
-                                                  {schedule.installment_number}
+                                                <td className="py-2 px-3">
+                                                  <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-blue-100 text-blue-700 font-semibold text-xs">
+                                                    {schedule.installment_number}
+                                                  </span>
                                                 </td>
                                                 <td className="py-2 px-3 text-slate-700">
                                                   {formatDate(schedule.due_date)}
@@ -925,22 +929,43 @@ export default function ClientBookingsPage() {
                                                 <td className="py-2 px-3 text-right font-semibold text-slate-900">
                                                   {formatCurrency(schedule.scheduled_amount)}
                                                 </td>
+                                                <td className="py-2 px-3 text-right font-semibold text-green-600">
+                                                  {formatCurrency(schedule.paid_amount || 0)}
+                                                </td>
+                                                <td className="py-2 px-3 text-right font-semibold">
+                                                  <span className={
+                                                    parseFloat(schedule.remaining_amount || 0) <= 0
+                                                      ? "text-gray-400"
+                                                      : parseFloat(schedule.remaining_amount || 0) >= parseFloat(schedule.scheduled_amount || 0)
+                                                      ? "text-blue-600"
+                                                      : "text-orange-600"
+                                                  }>
+                                                    {parseFloat(schedule.remaining_amount || 0) <= 0
+                                                      ? "—"
+                                                      : formatCurrency(schedule.remaining_amount)}
+                                                  </span>
+                                                </td>
                                                 <td className="py-2 px-3 text-right font-semibold text-orange-600">
                                                   {schedule.penalty_amount > 0 ? formatCurrency(schedule.penalty_amount) : '—'}
                                                 </td>
                                                 <td className="py-2 px-3 text-center">
                                                   {schedule.payment_status === 'paid' ? (
-                                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 border border-green-200">
                                                       <CheckCircle className="w-3 h-3" />
                                                       Paid
                                                     </span>
+                                                  ) : schedule.payment_status === 'partial' ? (
+                                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 border border-blue-200">
+                                                      <DollarSign className="w-3 h-3" />
+                                                      Partial
+                                                    </span>
                                                   ) : schedule.is_overdue ? (
-                                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800 border border-red-200">
                                                       <AlertCircle className="w-3 h-3" />
                                                       Overdue
                                                     </span>
                                                   ) : (
-                                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 border border-yellow-200">
                                                       <Clock className="w-3 h-3" />
                                                       Pending
                                                     </span>

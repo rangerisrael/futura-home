@@ -111,6 +111,7 @@ export async function POST(request) {
     const {
       schedule_id,
       contract_id,
+      payment_type = "full", // NEW: payment type
       amount_paid: received_amount_paid,
       penalty_paid: received_penalty_paid = 0,
       payment_method = "cash",
@@ -125,6 +126,7 @@ export async function POST(request) {
     console.log("📝 Received payment details:", {
       schedule_id,
       contract_id,
+      payment_type,
       received_amount_paid,
       received_penalty_paid,
       payment_method,
@@ -159,22 +161,54 @@ export async function POST(request) {
       );
     }
 
-    // SERVER-SIDE OVERRIDE: Always use the actual remaining amount from the schedule
-    // This prevents any frontend errors or manipulation
+    // Calculate payment amount based on payment type
     const remainingAmount = parseFloat(scheduleData.remaining_amount || scheduleData.scheduled_amount);
-    const amount_paid = remainingAmount;
+    const monthlyInstallment = parseFloat(scheduleData.contract?.monthly_installment || 0);
+
+    let amount_paid;
+
+    if (payment_type === 'full') {
+      // Full payment - pay entire remaining amount
+      amount_paid = remainingAmount;
+    } else {
+      // Partial/Monthly/Weekly/Daily - use received amount with validation
+      amount_paid = parseFloat(received_amount_paid);
+
+      // Validate minimum (10% of monthly installment)
+      const minAmount = monthlyInstallment * 0.1;
+      if (amount_paid < minAmount) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: `Minimum payment is ₱${minAmount.toFixed(2)}`,
+          },
+          { status: 400 }
+        );
+      }
+
+      // Validate doesn't exceed remaining
+      if (amount_paid > remainingAmount) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: "Payment exceeds remaining balance",
+          },
+          { status: 400 }
+        );
+      }
+    }
 
     // Auto-calculate penalty (3 days after due date)
     const calculatedPenalty = calculatePenalty(scheduleData);
     const penalty_paid = calculatedPenalty; // Always use calculated penalty
 
-    console.log("💰 SERVER OVERRIDE - Using correct amounts:", {
+    console.log("💰 Payment calculation:", {
+      payment_type,
       received_amount_paid,
-      received_penalty_paid,
       actual_amount_paid: amount_paid,
-      actual_penalty_paid: penalty_paid,
-      calculated_penalty: calculatedPenalty,
+      penalty_paid,
       remaining_amount: remainingAmount,
+      monthly_installment: monthlyInstallment,
     });
 
     // Validation: Ensure there's a remaining amount to pay
@@ -183,6 +217,17 @@ export async function POST(request) {
         {
           success: false,
           error: "No remaining amount to pay for this installment",
+        },
+        { status: 400 }
+      );
+    }
+
+    // Validation: Ensure payment amount is valid
+    if (amount_paid <= 0) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Payment amount must be greater than zero",
         },
         { status: 400 }
       );
@@ -207,6 +252,7 @@ export async function POST(request) {
         p_schedule_id: schedule_id,
         p_amount_paid: parseFloat(amount_paid),
         p_penalty_paid: parseFloat(penalty_paid),
+        p_payment_type: payment_type, // NEW: payment type parameter
         p_payment_method: payment_method,
         p_reference_number: reference_number,
         p_processed_by: processed_by,
