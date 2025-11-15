@@ -183,19 +183,23 @@ export default function Loans() {
       if (result.success) {
         toast.success("Payment reverted to pending successfully!");
 
-        // Reload contracts
-        loadContracts();
+        // Reload contracts and update selected contract
+        await loadContracts();
 
-        // Reload selected contract if modal is open
+        // If modal is open, refresh the selected contract with updated data
         if (selectedContract) {
-          loadContracts().then(() => {
-            const updatedContract = contracts.find(
+          // Re-fetch contracts to get the latest data
+          const response = await fetch("/api/contracts");
+          const contractsResult = await response.json();
+
+          if (contractsResult.success) {
+            const updatedContract = contractsResult.data.find(
               (c) => c.contract_id === selectedContract.contract_id
             );
             if (updatedContract) {
               setSelectedContract(updatedContract);
             }
-          });
+          }
         }
       } else {
         toast.error(result.message || "Failed to revert payment");
@@ -658,6 +662,9 @@ export default function Loans() {
                               <th className="text-right px-4 py-3 text-xs font-semibold text-gray-600 uppercase">
                                 Paid
                               </th>
+                              <th className="text-right px-4 py-3 text-xs font-semibold text-orange-600 uppercase">
+                                Penalty
+                              </th>
                               <th className="text-right px-4 py-3 text-xs font-semibold text-gray-600 uppercase">
                                 Balance
                               </th>
@@ -703,6 +710,9 @@ export default function Loans() {
                                   </td>
                                   <td className="px-4 py-3 text-right text-green-600 font-semibold">
                                     {formatCurrency(schedule.paid_amount)}
+                                  </td>
+                                  <td className="px-4 py-3 text-right text-orange-600 font-semibold">
+                                    {schedule.penalty_amount > 0 ? formatCurrency(schedule.penalty_amount) : "—"}
                                   </td>
                                   <td className="px-4 py-3 text-right text-red-600 font-semibold">
                                     {formatCurrency(runningBalance)}

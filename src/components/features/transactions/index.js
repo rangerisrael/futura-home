@@ -317,8 +317,8 @@ export default function Transactions() {
   ].sort((a, b) => a - b);
 
   return (
-    <div className="min-h-screen p-6 md:p-8">
-      <div className="max-w-7xl mx-auto space-y-6">
+    <div className="min-h-screen p-3 sm:p-4 md:p-6 lg:p-8">
+      <div className="max-w-7xl mx-auto space-y-4 sm:space-y-6">
         {/* Header */}
         <motion.div
           initial={{ opacity: 0, y: -20 }}
@@ -326,31 +326,34 @@ export default function Transactions() {
           className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4"
         >
           <div>
-            <h1 className="text-4xl font-bold text-slate-900 mb-2">
+            <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold text-slate-900 mb-2">
               Contract Payment Transactions
             </h1>
-            <p className="text-lg text-slate-600">
+            <p className="text-sm sm:text-base lg:text-lg text-slate-600">
               Monitor and manage all payment transactions
             </p>
           </div>
-          <div className="flex gap-3">
+          <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 w-full md:w-auto">
             <Button
               onClick={() => handleGenerateDateRangeReceipt("print")}
-              className="bg-gradient-to-r from-purple-500 to-purple-600 text-white shadow-lg hover:shadow-xl transition-all"
+              className="bg-gradient-to-r from-purple-500 to-purple-600 text-white shadow-lg hover:shadow-xl transition-all w-full sm:w-auto"
             >
-              <Printer className="w-5 h-5 mr-2" /> Print Receipt
+              <Printer className="w-4 h-4 sm:w-5 sm:h-5 mr-2" />
+              <span className="text-sm sm:text-base">Print Receipt</span>
             </Button>
             <Button
               onClick={() => handleGenerateDateRangeReceipt("download")}
-              className="bg-gradient-to-r from-green-500 to-green-600 text-white shadow-lg hover:shadow-xl transition-all"
+              className="bg-gradient-to-r from-green-500 to-green-600 text-white shadow-lg hover:shadow-xl transition-all w-full sm:w-auto"
             >
-              <Download className="w-5 h-5 mr-2" /> Download Receipt
+              <Download className="w-4 h-4 sm:w-5 sm:h-5 mr-2" />
+              <span className="text-sm sm:text-base">Download Receipt</span>
             </Button>
             <Button
               onClick={loadData}
-              className="bg-gradient-to-r from-red-500 to-red-600 text-white shadow-lg hover:shadow-xl transition-all"
+              className="bg-gradient-to-r from-red-500 to-red-600 text-white shadow-lg hover:shadow-xl transition-all w-full sm:w-auto"
             >
-              <RefreshCw className="w-5 h-5 mr-2" /> Refresh
+              <RefreshCw className="w-4 h-4 sm:w-5 sm:h-5 mr-2" />
+              <span className="text-sm sm:text-base">Refresh</span>
             </Button>
           </div>
         </motion.div>
@@ -361,65 +364,65 @@ export default function Transactions() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.1 }}
         >
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
             <Card className="bg-gradient-to-br from-blue-50 to-blue-100 border-blue-200 shadow-lg">
-              <CardContent className="p-6">
+              <CardContent className="p-4 sm:p-6">
                 <div className="flex justify-between items-start">
                   <div>
-                    <p className="text-sm font-medium text-blue-700">
+                    <p className="text-xs sm:text-sm font-medium text-blue-700">
                       Total Transactions
                     </p>
-                    <p className="text-3xl font-bold text-blue-900 mt-1">
+                    <p className="text-2xl sm:text-3xl font-bold text-blue-900 mt-1">
                       {filteredTransactions.length}
                     </p>
                     <p className="text-xs text-blue-600 mt-1">
                       {completedCount} completed
                     </p>
                   </div>
-                  <div className="p-3 rounded-xl bg-blue-200/50">
-                    <Receipt className="w-6 h-6 text-blue-700" />
+                  <div className="p-2 sm:p-3 rounded-xl bg-blue-200/50">
+                    <Receipt className="w-5 h-5 sm:w-6 sm:h-6 text-blue-700" />
                   </div>
                 </div>
               </CardContent>
             </Card>
 
             <Card className="bg-gradient-to-br from-green-50 to-green-100 border-green-200 shadow-lg">
-              <CardContent className="p-6">
+              <CardContent className="p-4 sm:p-6">
                 <div className="flex justify-between items-start">
                   <div>
-                    <p className="text-sm font-medium text-green-700">
+                    <p className="text-xs sm:text-sm font-medium text-green-700">
                       Total Amount Paid
                     </p>
-                    <p className="text-3xl font-bold text-green-900 mt-1">
+                    <p className="text-2xl sm:text-3xl font-bold text-green-900 mt-1">
                       ₱{totalAmount.toLocaleString()}
                     </p>
                     <p className="text-xs text-green-600 mt-1">
                       All transactions
                     </p>
                   </div>
-                  <div className="p-3 rounded-xl bg-green-200/50">
-                    <DollarSign className="w-6 h-6 text-green-700" />
+                  <div className="p-2 sm:p-3 rounded-xl bg-green-200/50">
+                    <DollarSign className="w-5 h-5 sm:w-6 sm:h-6 text-green-700" />
                   </div>
                 </div>
               </CardContent>
             </Card>
 
-            <Card className="bg-gradient-to-br from-orange-50 to-orange-100 border-orange-200 shadow-lg">
-              <CardContent className="p-6">
+            <Card className="bg-gradient-to-br from-orange-50 to-orange-100 border-orange-200 shadow-lg sm:col-span-2 lg:col-span-1">
+              <CardContent className="p-4 sm:p-6">
                 <div className="flex justify-between items-start">
                   <div>
-                    <p className="text-sm font-medium text-orange-700">
+                    <p className="text-xs sm:text-sm font-medium text-orange-700">
                       Total Penalties
                     </p>
-                    <p className="text-3xl font-bold text-orange-900 mt-1">
+                    <p className="text-2xl sm:text-3xl font-bold text-orange-900 mt-1">
                       ₱{totalPenalties.toLocaleString()}
                     </p>
                     <p className="text-xs text-orange-600 mt-1">
                       Penalty charges
                     </p>
                   </div>
-                  <div className="p-3 rounded-xl bg-orange-200/50">
-                    <TrendingUp className="w-6 h-6 text-orange-700" />
+                  <div className="p-2 sm:p-3 rounded-xl bg-orange-200/50">
+                    <TrendingUp className="w-5 h-5 sm:w-6 sm:h-6 text-orange-700" />
                   </div>
                 </div>
               </CardContent>
@@ -441,7 +444,7 @@ export default function Transactions() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
                 {/* Start Date Filter */}
                 <div className="space-y-2">
                   <label className="block text-sm font-medium text-slate-700">
@@ -613,8 +616,125 @@ export default function Transactions() {
                   </p>
                 </div>
               ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full">
+                <>
+                  {/* Mobile/Tablet Card View */}
+                  <div className="block 2xl:hidden space-y-4 p-4">
+                    {filteredTransactions.map((transaction, index) => (
+                      <motion.div
+                        key={transaction.transaction_id}
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: index * 0.03 }}
+                        className="bg-white border border-slate-200 rounded-lg p-4 shadow-sm hover:shadow-md transition-shadow"
+                      >
+                        <div className="space-y-3">
+                          {/* Transaction ID and Status */}
+                          <div className="flex justify-between items-start">
+                            <div>
+                              <p className="text-xs text-slate-500 mb-1">Transaction ID</p>
+                              <p className="text-sm font-semibold text-slate-900 break-all">
+                                {transaction.transaction_id}
+                              </p>
+                            </div>
+                            <Badge
+                              className={`${getStatusColor(
+                                transaction.payment_status
+                              )} capitalize flex items-center gap-1 shrink-0 ml-2`}
+                            >
+                              {getStatusIcon(transaction.payment_status)}
+                              <span className="text-xs">{transaction.payment_status || "N/A"}</span>
+                            </Badge>
+                          </div>
+
+                          {/* Client Info */}
+                          <div>
+                            <p className="text-xs text-slate-500 mb-1">Client Name</p>
+                            <p className="text-sm font-medium text-slate-900">
+                              {transaction.property_contracts?.client_name || "N/A"}
+                            </p>
+                            {transaction.property_contracts?.client_phone && (
+                              <p className="text-xs text-slate-500 mt-0.5">
+                                {transaction.property_contracts.client_phone}
+                              </p>
+                            )}
+                          </div>
+
+                          {/* Contract and Date */}
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <p className="text-xs text-slate-500 mb-1">Contract ID</p>
+                              <p className="text-sm text-slate-900">
+                                {transaction.contract_id || "N/A"}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-slate-500 mb-1">Date</p>
+                              <div className="flex items-center gap-1">
+                                <Calendar className="w-3 h-3 text-slate-400" />
+                                <p className="text-sm text-slate-900">
+                                  {transaction.transaction_date
+                                    ? format(new Date(transaction.transaction_date), "MMM dd, yyyy")
+                                    : "N/A"}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Amount and Penalty */}
+                          <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-100">
+                            <div>
+                              <p className="text-xs text-slate-500 mb-1">Amount</p>
+                              <p className="text-base font-semibold text-green-600">
+                                ₱{parseFloat(transaction.total_amount || 0).toLocaleString()}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-slate-500 mb-1">Penalty</p>
+                              <p className="text-base font-semibold text-orange-600">
+                                ₱{parseFloat(transaction.penalty_paid || 0).toLocaleString()}
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Payment Method */}
+                          <div>
+                            <p className="text-xs text-slate-500 mb-1">Payment Method</p>
+                            <Badge className="bg-blue-50 text-blue-700 border-blue-200 capitalize">
+                              {transaction.payment_method || "N/A"}
+                            </Badge>
+                          </div>
+
+                          {/* Actions */}
+                          <div className="flex gap-2 pt-2">
+                            <Button
+                              size="sm"
+                              onClick={() =>
+                                handleGenerateReceipt(transaction.transaction_id, "print")
+                              }
+                              className="bg-purple-500 hover:bg-purple-600 text-white flex-1"
+                            >
+                              <Printer className="w-4 h-4 mr-1" />
+                              Print
+                            </Button>
+                            <Button
+                              size="sm"
+                              onClick={() =>
+                                handleGenerateReceipt(transaction.transaction_id, "download")
+                              }
+                              className="bg-green-500 hover:bg-green-600 text-white flex-1"
+                            >
+                              <Download className="w-4 h-4 mr-1" />
+                              Download
+                            </Button>
+                          </div>
+                        </div>
+                      </motion.div>
+                    ))}
+                  </div>
+
+                  {/* Desktop Table View (2XL+ screens only) */}
+                  <div className="hidden 2xl:block overflow-x-auto">
+                    <table className="w-full">
                     <thead className="bg-slate-50 border-b border-slate-200">
                       <tr>
                         <th className="px-6 py-4 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">
@@ -755,6 +875,7 @@ export default function Transactions() {
                     </tbody>
                   </table>
                 </div>
+                </>
               )}
             </CardContent>
           </Card>

@@ -12,7 +12,6 @@ const DashboardPage = () => {
         "admin",
         "customer service",
         "sales representative",
-        "home owner",
         "collection",
       ]}
     >

@@ -27,35 +27,62 @@ const supabaseAdmin = createSupabaseAdmin();
  * Default penalty rate: 2% per month (or from schedule.penalty_rate)
  */
 function calculatePenalty(schedule) {
+  // Parse due date and normalize to start of day
   const dueDate = new Date(schedule.due_date);
+  dueDate.setHours(0, 0, 0, 0);
+
+  // Get current date normalized to start of day
   const currentDate = new Date();
+  currentDate.setHours(0, 0, 0, 0);
 
   // Add 3 days grace period
   const gracePeriodEnd = new Date(dueDate);
   gracePeriodEnd.setDate(gracePeriodEnd.getDate() + 3);
+  gracePeriodEnd.setHours(23, 59, 59, 999); // End of grace period day
+
+  console.log("📅 Penalty calculation dates:", {
+    due_date: dueDate.toISOString(),
+    grace_period_end: gracePeriodEnd.toISOString(),
+    current_date: currentDate.toISOString(),
+    is_overdue: currentDate > gracePeriodEnd,
+  });
 
   // Check if payment is overdue (beyond grace period)
   if (currentDate <= gracePeriodEnd) {
+    console.log("✅ Within grace period - no penalty");
     return 0; // No penalty within grace period
   }
 
   // Calculate days overdue (after grace period)
-  const daysOverdue = Math.floor((currentDate - gracePeriodEnd) / (1000 * 60 * 60 * 24));
+  const msPerDay = 1000 * 60 * 60 * 24;
+  const gracePeriodEndDate = new Date(gracePeriodEnd);
+  gracePeriodEndDate.setHours(0, 0, 0, 0);
+  const daysOverdue = Math.floor((currentDate - gracePeriodEndDate) / msPerDay);
+
+  console.log("⏰ Days overdue:", daysOverdue);
 
   if (daysOverdue <= 0) {
     return 0;
   }
 
-  // Get penalty rate from schedule or use default (2% per month = 0.02)
-  const penaltyRate = schedule.penalty_rate || 0.02;
+  // Get penalty rate from schedule or use default (3% per month = 0.03)
+  const penaltyRate = schedule.penalty_rate || 0.03;
 
-  // Calculate penalty based on scheduled amount
-  const scheduledAmount = parseFloat(schedule.scheduled_amount || 0);
+  // Calculate penalty based on scheduled amount or remaining amount
+  const baseAmount = parseFloat(schedule.remaining_amount || schedule.scheduled_amount || 0);
 
   // Apply monthly penalty rate, converted to daily
-  // Formula: (scheduled_amount * penalty_rate / 30 days) * days_overdue
+  // Formula: (base_amount * penalty_rate / 30 days) * days_overdue
   const dailyPenaltyRate = penaltyRate / 30;
-  const penaltyAmount = scheduledAmount * dailyPenaltyRate * daysOverdue;
+  const penaltyAmount = baseAmount * dailyPenaltyRate * daysOverdue;
+
+  console.log("💰 Penalty calculation:", {
+    base_amount: baseAmount,
+    penalty_rate: penaltyRate,
+    daily_rate: dailyPenaltyRate,
+    days_overdue: daysOverdue,
+    penalty_amount: penaltyAmount,
+  });
 
   return Math.round(penaltyAmount * 100) / 100; // Round to 2 decimal places
 }
@@ -84,8 +111,8 @@ export async function POST(request) {
     const {
       schedule_id,
       contract_id,
-      amount_paid,
-      penalty_paid = 0,
+      amount_paid: received_amount_paid,
+      penalty_paid: received_penalty_paid = 0,
       payment_method = "cash",
       reference_number = null,
       check_number = null,
@@ -95,11 +122,11 @@ export async function POST(request) {
       notes = null,
     } = body;
 
-    console.log("📝 Payment details:", {
+    console.log("📝 Received payment details:", {
       schedule_id,
       contract_id,
-      amount_paid,
-      penalty_paid,
+      received_amount_paid,
+      received_penalty_paid,
       payment_method,
     });
 
@@ -109,16 +136,6 @@ export async function POST(request) {
         {
           success: false,
           error: "Schedule ID is required",
-        },
-        { status: 400 }
-      );
-    }
-
-    if (!amount_paid || amount_paid <= 0) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Valid payment amount is required",
         },
         { status: 400 }
       );
@@ -142,15 +159,34 @@ export async function POST(request) {
       );
     }
 
-    // Auto-calculate penalty if not provided (3 days after due date)
-    const calculatedPenalty = calculatePenalty(scheduleData);
-    const finalPenaltyPaid = penalty_paid > 0 ? penalty_paid : calculatedPenalty;
+    // SERVER-SIDE OVERRIDE: Always use the actual remaining amount from the schedule
+    // This prevents any frontend errors or manipulation
+    const remainingAmount = parseFloat(scheduleData.remaining_amount || scheduleData.scheduled_amount);
+    const amount_paid = remainingAmount;
 
-    console.log("💰 Penalty calculation:", {
-      provided_penalty: penalty_paid,
+    // Auto-calculate penalty (3 days after due date)
+    const calculatedPenalty = calculatePenalty(scheduleData);
+    const penalty_paid = calculatedPenalty; // Always use calculated penalty
+
+    console.log("💰 SERVER OVERRIDE - Using correct amounts:", {
+      received_amount_paid,
+      received_penalty_paid,
+      actual_amount_paid: amount_paid,
+      actual_penalty_paid: penalty_paid,
       calculated_penalty: calculatedPenalty,
-      final_penalty_paid: finalPenaltyPaid,
+      remaining_amount: remainingAmount,
     });
+
+    // Validation: Ensure there's a remaining amount to pay
+    if (remainingAmount <= 0) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "No remaining amount to pay for this installment",
+        },
+        { status: 400 }
+      );
+    }
 
     // Update penalty_amount in schedule if there's a calculated penalty
     if (calculatedPenalty > 0 && calculatedPenalty !== scheduleData.penalty_amount) {
@@ -162,34 +198,15 @@ export async function POST(request) {
       console.log("✅ Updated penalty_amount in schedule:", calculatedPenalty);
     }
 
-    // Recalculate remaining amount including penalty
-    const remainingAmountWithPenalty =
-      parseFloat(scheduleData.scheduled_amount) -
-      parseFloat(scheduleData.paid_amount) +
-      parseFloat(calculatedPenalty);
+    // Call the database function to record payment with the correct amounts
+    console.log("✅ Proceeding to record payment with SERVER-CALCULATED amounts");
 
-    // Validate payment amount doesn't exceed remaining
-    const totalPayment = parseFloat(amount_paid) + parseFloat(finalPenaltyPaid);
-
-    if (totalPayment > remainingAmountWithPenalty) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: `Payment amount (₱${totalPayment.toFixed(2)}) exceeds remaining balance (₱${remainingAmountWithPenalty.toFixed(2)})`,
-        },
-        { status: 400 }
-      );
-    }
-
-    console.log("✅ Payment validation passed");
-
-    // Call the database function to record payment (use calculated penalty)
     const { data: paymentResult, error: paymentError } = await supabaseAdmin.rpc(
       "record_walk_in_payment",
       {
         p_schedule_id: schedule_id,
         p_amount_paid: parseFloat(amount_paid),
-        p_penalty_paid: parseFloat(finalPenaltyPaid),
+        p_penalty_paid: parseFloat(penalty_paid),
         p_payment_method: payment_method,
         p_reference_number: reference_number,
         p_processed_by: processed_by,
@@ -204,7 +221,7 @@ export async function POST(request) {
         {
           success: false,
           error: paymentError.message || "Failed to record payment",
-          details: paymentError,
+          details: process.env.NODE_ENV === "development" ? paymentError : undefined,
         },
         { status: 400 }
       );
@@ -332,10 +349,27 @@ export async function GET(request) {
 
     // Calculate days overdue for display
     const dueDate = new Date(schedule.due_date);
+    dueDate.setHours(0, 0, 0, 0);
+
     const gracePeriodEnd = new Date(dueDate);
     gracePeriodEnd.setDate(gracePeriodEnd.getDate() + 3);
+    gracePeriodEnd.setHours(23, 59, 59, 999);
+
     const currentDate = new Date();
-    const daysOverdue = Math.max(0, Math.floor((currentDate - gracePeriodEnd) / (1000 * 60 * 60 * 24)));
+    currentDate.setHours(0, 0, 0, 0);
+
+    const gracePeriodEndForCalc = new Date(gracePeriodEnd);
+    gracePeriodEndForCalc.setHours(0, 0, 0, 0);
+
+    const daysOverdue = Math.max(0, Math.floor((currentDate - gracePeriodEndForCalc) / (1000 * 60 * 60 * 24)));
+
+    console.log("📊 GET endpoint penalty info:", {
+      due_date: schedule.due_date,
+      grace_period_end: gracePeriodEnd.toISOString(),
+      current_date: currentDate.toISOString(),
+      days_overdue: daysOverdue,
+      calculated_penalty: calculatedPenalty,
+    });
 
     // Update penalty_amount in database if calculated penalty is different
     if (calculatedPenalty > 0 && calculatedPenalty !== schedule.penalty_amount) {

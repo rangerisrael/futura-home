@@ -1646,9 +1646,209 @@ export default function ReservationDetails() {
             </p>
           </motion.div>
         ) : (
-          <Card className="overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full">
+          <>
+            {/* Mobile/Tablet Card View */}
+            <div className="block 2xl:hidden space-y-4">
+              {filteredReservations.map((reservation, index) => (
+                <motion.div
+                  key={reservation.reservation_id}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: index * 0.05 }}
+                  className="bg-white border border-slate-200 rounded-lg p-4 shadow-sm hover:shadow-md transition-shadow"
+                  onClick={() => {
+                    setSelectedReservation(reservation);
+                    setShowDetailModal(true);
+                  }}
+                >
+                  <div className="space-y-3">
+                    {/* Tracking Number and Status */}
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <p className="text-xs text-slate-500 mb-1">Tracking Number</p>
+                        <div className="flex items-center">
+                          <FileText className="w-4 h-4 text-red-600 mr-2" />
+                          <span className="font-mono font-bold text-slate-900 text-sm">
+                            {reservation.tracking_number ||
+                              `TRK-${reservation.reservation_id
+                                ?.slice(0, 8)
+                                .toUpperCase()}`}
+                          </span>
+                        </div>
+                      </div>
+                      {getStatusBadge(reservation.status)}
+                    </div>
+
+                    {/* Property Price Info */}
+                    <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-100">
+                      <div>
+                        <p className="text-xs text-slate-500 mb-1">Total Property Price</p>
+                        <div className="font-semibold text-blue-600 text-base">
+                          {formatCurrencyShort(
+                            reservation.property_info?.property_price || 0
+                          )}
+                        </div>
+                        <div className="text-xs text-slate-500">
+                          {formatCurrency(
+                            reservation.property_info?.property_price || 0
+                          )}
+                        </div>
+                      </div>
+                      <div>
+                        <p className="text-xs text-slate-500 mb-1">10% of Total Price</p>
+                        <div className="font-semibold text-purple-600 text-base">
+                          {formatCurrencyShort(
+                            (reservation.property_info?.property_price || 0) * 0.1
+                          )}
+                        </div>
+                        <div className="text-xs text-slate-500">
+                          10% of{" "}
+                          {formatCurrencyShort(
+                            reservation.property_info?.property_price || 0
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Reservation Fee and Date */}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <p className="text-xs text-slate-500 mb-1">Reservation Fee</p>
+                        <div className="font-semibold text-green-600 text-base">
+                          {formatCurrencyShort(reservation.reservation_fee)}
+                        </div>
+                        <div className="text-xs text-slate-500">
+                          {(
+                            (reservation.reservation_fee /
+                              (reservation.property_info?.property_price || 1)) *
+                            100
+                          ).toFixed(0)}
+                          % of{" "}
+                          {formatCurrencyShort(
+                            reservation.property_info?.property_price || 0
+                          )}
+                        </div>
+                      </div>
+                      <div>
+                        <p className="text-xs text-slate-500 mb-1">Date</p>
+                        <div className="text-sm text-slate-900">
+                          {formatDate(reservation.created_at)}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Actions */}
+                    <div className="flex items-center gap-2 pt-2 border-t border-slate-100">
+                      {reservation.status === "pending" && (
+                        <>
+                          <Button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleApprove(reservation.reservation_id);
+                            }}
+                            disabled={processingId === reservation.reservation_id}
+                            className="bg-green-600 hover:bg-green-700 text-white px-3 py-2 text-xs flex-1"
+                          >
+                            {processingId === reservation.reservation_id ? (
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                            ) : (
+                              <>
+                                <CheckCircle className="h-3 w-3 mr-1" />
+                                Approve
+                              </>
+                            )}
+                          </Button>
+                          <Button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleReject(reservation.reservation_id);
+                            }}
+                            disabled={processingId === reservation.reservation_id}
+                            className="bg-red-600 hover:bg-red-700 text-white px-3 py-2 text-xs flex-1"
+                          >
+                            {processingId === reservation.reservation_id ? (
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                            ) : (
+                              <>
+                                <XCircle className="h-3 w-3 mr-1" />
+                                Reject
+                              </>
+                            )}
+                          </Button>
+                        </>
+                      )}
+                      {reservation.status === "approved" && (
+                        <>
+                          <Button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleRevert(reservation.reservation_id);
+                            }}
+                            disabled={processingId === reservation.reservation_id}
+                            className="bg-orange-600 hover:bg-orange-700 text-white px-3 py-2 text-xs flex-1"
+                          >
+                            {processingId === reservation.reservation_id ? (
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                            ) : (
+                              <>
+                                <RotateCcw className="h-3 w-3 mr-1" />
+                                Revert
+                              </>
+                            )}
+                          </Button>
+                          <Button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              printReceipt(reservation);
+                            }}
+                            variant="outline"
+                            className="border-slate-300 text-slate-700 px-3 py-2 text-xs"
+                          >
+                            <Printer className="h-3 w-3" />
+                          </Button>
+                          <Button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setContractData(reservation);
+                              setShowContractModal(true);
+                            }}
+                            className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 text-xs"
+                          >
+                            <FileSignature className="h-3 w-3" />
+                          </Button>
+                        </>
+                      )}
+                      {reservation.status === "rejected" && (
+                        <>
+                          <Button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleRevert(reservation.reservation_id);
+                            }}
+                            disabled={processingId === reservation.reservation_id}
+                            className="bg-orange-600 hover:bg-orange-700 text-white px-3 py-2 text-xs flex-1"
+                          >
+                            {processingId === reservation.reservation_id ? (
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                            ) : (
+                              <>
+                                <RotateCcw className="h-3 w-3 mr-1" />
+                                Revert
+                              </>
+                            )}
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </motion.div>
+              ))}
+            </div>
+
+            {/* Desktop Table View (2XL+ screens only) */}
+            <Card className="hidden 2xl:block overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full">
                 <thead className="bg-slate-50 border-b border-slate-200">
                   <tr>
                     <th className="px-6 py-4 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">
@@ -1893,6 +2093,7 @@ export default function ReservationDetails() {
               </table>
             </div>
           </Card>
+          </>
         )}
       </div>
 

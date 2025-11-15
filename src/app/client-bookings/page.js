@@ -17,7 +17,7 @@ import RealNotificationBell from '@/components/ui/RealNotificationBell';
 
 export default function ClientBookingsPage() {
   const router = useRouter();
-  const { user, profile, isAuthenticated } = useClientAuth();
+  const { user, profile, isAuthenticated, loading: authLoading } = useClientAuth();
   const [loading, setLoading] = useState(true);
   const [reservations, setReservations] = useState([]);
   const [filteredReservations, setFilteredReservations] = useState([]);
@@ -26,13 +26,21 @@ export default function ClientBookingsPage() {
   const [statusFilter, setStatusFilter] = useState('all');
 
   useEffect(() => {
-    if (!isAuthenticated) {
+    // Wait for auth to initialize - don't redirect while still loading
+    if (authLoading) return;
+
+    // Only redirect if auth is done loading and user is not authenticated
+    if (!authLoading && !isAuthenticated) {
       toast.error('Please login to view your reservations');
       router.push('/client-login');
       return;
     }
-    loadReservations();
-  }, [isAuthenticated, user]);
+
+    // Only load reservations if authenticated and user data is available
+    if (isAuthenticated && user) {
+      loadReservations();
+    }
+  }, [isAuthenticated, user, authLoading]);
 
   const loadReservations = async () => {
     if (!user) return;
@@ -901,6 +909,7 @@ export default function ClientBookingsPage() {
                                               <th className="text-left py-2 px-3 text-xs font-semibold text-slate-600">#</th>
                                               <th className="text-left py-2 px-3 text-xs font-semibold text-slate-600">Due Date</th>
                                               <th className="text-right py-2 px-3 text-xs font-semibold text-slate-600">Amount</th>
+                                              <th className="text-right py-2 px-3 text-xs font-semibold text-orange-600">Penalty</th>
                                               <th className="text-center py-2 px-3 text-xs font-semibold text-slate-600">Status</th>
                                             </tr>
                                           </thead>
@@ -915,6 +924,9 @@ export default function ClientBookingsPage() {
                                                 </td>
                                                 <td className="py-2 px-3 text-right font-semibold text-slate-900">
                                                   {formatCurrency(schedule.scheduled_amount)}
+                                                </td>
+                                                <td className="py-2 px-3 text-right font-semibold text-orange-600">
+                                                  {schedule.penalty_amount > 0 ? formatCurrency(schedule.penalty_amount) : '—'}
                                                 </td>
                                                 <td className="py-2 px-3 text-center">
                                                   {schedule.payment_status === 'paid' ? (

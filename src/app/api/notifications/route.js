@@ -45,7 +45,9 @@ export async function GET(request) {
 
     // Filter notifications by userId (specific user) OR role (role-based)
     if (userId && role) {
-      console.log(`🔍 Applying filter for userId: "${userId}" and role: "${role}"`);
+      console.log(
+        `🔍 Applying filter for userId: "${userId}" and role: "${role}"`
+      );
 
       // User sees notifications that are either:
       // 1. Specifically for them (recipient_id matches)
@@ -63,12 +65,12 @@ export async function GET(request) {
       query = query.or(filterQuery);
 
       // Additional safety: exclude NULL recipient_role when no userId
-      query = query.not('recipient_role', 'is', null);
+      query = query.not("recipient_role", "is", null);
     } else if (userId) {
       console.log(`🔍 Applying filter for userId only: "${userId}"`);
 
       // Only show notifications specifically for this user
-      query = query.eq('recipient_id', userId);
+      query = query.eq("recipient_id", userId);
     } else {
       console.log("⚠️ No role or userId provided - showing all notifications");
     }
@@ -91,11 +93,16 @@ export async function GET(request) {
 
     // Debug: Log what notifications were returned
     if (data && data.length > 0) {
-      console.log("📋 Notification recipient roles:", data.map(n => ({
-        title: n.title,
-        recipient_role: n.recipient_role,
-        recipient_id: n.recipient_id
-      })));
+      console.log("📋 Notification recipient roles:", data);
+
+      console.log(
+        "📋 Notification recipient roles:",
+        data.map((n) => ({
+          title: n.title,
+          recipient_role: n.recipient_role,
+          recipient_id: n.recipient_id,
+        }))
+      );
     }
 
     // Calculate counts

@@ -163,6 +163,121 @@ export async function POST(request) {
       console.log("✅ Transfer history record deleted");
     }
 
+    // Create notifications for current owner and original owner
+    try {
+      // Find users by email from Supabase Auth
+      const { data: authUsers, error: authError } = await supabaseAdmin.auth.admin.listUsers();
+
+      // Find the current owner's user ID by email (the person losing the contract)
+      const currentOwnerUser = authUsers?.users?.find(
+        (user) => user.email === transferRecord.new_client_email
+      );
+
+      // Create notification for current owner (they're losing the contract)
+      if (!authError && currentOwnerUser) {
+        const currentOwnerNotification = {
+          notification_type: "contract_transfer_revert",
+          source_table: "property_contracts",
+          source_table_display_name: "Contract Transfer Revert",
+          source_record_id: contract_id,
+          title: "Contract Transfer Reverted",
+          message: `The contract for ${currentContract.property_title || 'property'} (Contract #${currentContract.contract_number}) that was transferred to you has been reverted back to the original owner ${transferRecord.original_client_name}.`,
+          icon: "↩️",
+          priority: "high",
+          status: "unread",
+          recipient_id: currentOwnerUser.id,
+          recipient_role: "home owner",
+          data: {
+            contract_id: contract_id,
+            contract_number: currentContract.contract_number,
+            property_title: currentContract.property_title,
+            original_owner_name: transferRecord.original_client_name,
+            revert_reason: "Transfer reverted by administrator",
+            action_url: "/certified-homeowner", // Admin URL
+            client_action_url: "/client-contract-to-sell", // Client URL
+          },
+          action_url: "/certified-homeowner",
+        };
+
+        console.log("📤 Attempting to create notification for current owner:", currentOwnerNotification);
+
+        const { data: currentOwnerNotifData, error: currentOwnerNotifError } = await supabaseAdmin
+          .from("notifications_tbl")
+          .insert(currentOwnerNotification)
+          .select();
+
+        if (currentOwnerNotifError) {
+          console.error("❌ Could not create notification for current owner:", currentOwnerNotifError);
+          console.error("❌ Full error details:", {
+            message: currentOwnerNotifError.message,
+            details: currentOwnerNotifError.details,
+            hint: currentOwnerNotifError.hint,
+            code: currentOwnerNotifError.code,
+          });
+        } else {
+          console.log("✅ Notification sent to current owner (losing contract):", transferRecord.new_client_email, "Notification ID:", currentOwnerNotifData?.[0]?.id);
+        }
+      } else {
+        console.warn("⚠️ Could not find current owner user account:", transferRecord.new_client_email, "Error:", authError?.message);
+      }
+
+      // Find the original owner's user ID by email (the person getting the contract back)
+      const originalOwnerUser = authUsers?.users?.find(
+        (user) => user.email === transferRecord.original_client_email
+      );
+
+      // Create notification for original owner (they're getting the contract back)
+      if (originalOwnerUser) {
+        const originalOwnerNotification = {
+          notification_type: "contract_transfer_revert",
+          source_table: "property_contracts",
+          source_table_display_name: "Contract Transfer Revert",
+          source_record_id: contract_id,
+          title: "Contract Restored to You",
+          message: `Your contract for ${currentContract.property_title || 'property'} (Contract #${currentContract.contract_number}) has been restored back to you. The previous transfer to ${transferRecord.new_client_name} has been reverted.`,
+          icon: "✅",
+          priority: "high",
+          status: "unread",
+          recipient_id: originalOwnerUser.id,
+          recipient_role: "home owner",
+          data: {
+            contract_id: contract_id,
+            contract_number: currentContract.contract_number,
+            property_title: currentContract.property_title,
+            previous_transfer_recipient: transferRecord.new_client_name,
+            revert_reason: "Transfer reverted by administrator",
+            action_url: "/certified-homeowner", // Admin URL
+            client_action_url: "/client-contract-to-sell", // Client URL
+          },
+          action_url: "/certified-homeowner",
+        };
+
+        console.log("📤 Attempting to create notification for original owner:", originalOwnerNotification);
+
+        const { data: originalOwnerNotifData, error: originalOwnerNotifError } = await supabaseAdmin
+          .from("notifications_tbl")
+          .insert(originalOwnerNotification)
+          .select();
+
+        if (originalOwnerNotifError) {
+          console.error("❌ Could not create notification for original owner:", originalOwnerNotifError);
+          console.error("❌ Full error details:", {
+            message: originalOwnerNotifError.message,
+            details: originalOwnerNotifError.details,
+            hint: originalOwnerNotifError.hint,
+            code: originalOwnerNotifError.code,
+          });
+        } else {
+          console.log("✅ Notification sent to original owner (getting contract back):", transferRecord.original_client_email, "Notification ID:", originalOwnerNotifData?.[0]?.id);
+        }
+      } else {
+        console.warn("⚠️ Could not find original owner user account:", transferRecord.original_client_email);
+      }
+    } catch (notificationError) {
+      console.warn("⚠️ Error creating revert notifications:", notificationError.message);
+      // Don't fail the revert if notifications fail
+    }
+
     console.log("✅ Contract transfer reverted successfully");
 
     return NextResponse.json({

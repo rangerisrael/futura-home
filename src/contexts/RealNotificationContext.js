@@ -42,7 +42,9 @@ export const RealNotificationProvider = ({ children }) => {
       console.log("🔍 Loading notifications from API...");
 
       // Get current user ID and role
-      const { data: { user } } = await supabase.auth.getUser();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
       const userId = user?.id;
       const userRole = user?.user_metadata?.role?.toLowerCase();
 
@@ -78,16 +80,43 @@ export const RealNotificationProvider = ({ children }) => {
 
       // Debug: Show what notifications were returned and for which roles
       if (data && data.length > 0) {
-        console.log("📋 Notifications received:");
+        console.log("📋 Notifications received:", data);
         data.forEach((notif, index) => {
           console.log(`  ${index + 1}. "${notif.title}"`);
           console.log(`     - recipient_role: "${notif.recipient_role}"`);
-          console.log(`     - recipient_id: ${notif.recipient_id || 'null'}`);
+          console.log(`     - recipient_id: ${notif.recipient_id || "null"}`);
           console.log(`     - Who can see this?`);
-          console.log(`       • Admin: ${notif.recipient_role === 'admin' || notif.recipient_role === 'all' ? '✅ YES' : '❌ NO'}`);
-          console.log(`       • Sales Rep: ${notif.recipient_role === 'sales representative' || notif.recipient_role === 'all' ? '✅ YES' : '❌ NO'}`);
-          console.log(`       • Customer Service: ${notif.recipient_role === 'customer service' || notif.recipient_role === 'all' ? '✅ YES' : '❌ NO'}`);
-          console.log(`       • Collection: ${notif.recipient_role === 'collection' || notif.recipient_role === 'all' ? '✅ YES' : '❌ NO'}`);
+          console.log(
+            `       • Admin: ${
+              notif.recipient_role === "admin" || notif.recipient_role === "all"
+                ? "✅ YES"
+                : "❌ NO"
+            }`
+          );
+          console.log(
+            `       • Sales Rep: ${
+              notif.recipient_role === "sales representative" ||
+              notif.recipient_role === "all"
+                ? "✅ YES"
+                : "❌ NO"
+            }`
+          );
+          console.log(
+            `       • Customer Service: ${
+              notif.recipient_role === "customer service" ||
+              notif.recipient_role === "all"
+                ? "✅ YES"
+                : "❌ NO"
+            }`
+          );
+          console.log(
+            `       • Collection: ${
+              notif.recipient_role === "collection" ||
+              notif.recipient_role === "all"
+                ? "✅ YES"
+                : "❌ NO"
+            }`
+          );
         });
       }
 
@@ -101,6 +130,7 @@ export const RealNotificationProvider = ({ children }) => {
         timestamp: notification.created_at,
         read: notification.status === "read",
         action: getActionFromUrl(notification.action_url),
+        action_url: notification.action_url, // Keep the actual URL
         action_url: notification.action_url, // Keep the actual URL
         priority: notification.priority,
         title: notification.title,
@@ -144,7 +174,10 @@ export const RealNotificationProvider = ({ children }) => {
   };
 
   // Check if notification is for current user
-  const isNotificationForCurrentUser = (notification, userInfo = currentUser) => {
+  const isNotificationForCurrentUser = (
+    notification,
+    userInfo = currentUser
+  ) => {
     if (!userInfo) {
       console.warn("⚠️ No current user set, skipping notification");
       return false;
@@ -168,7 +201,9 @@ export const RealNotificationProvider = ({ children }) => {
         console.log("  ✅ Notification is for specific user (ID match)");
         return true;
       } else {
-        console.log("  ❌ Notification has recipient_id but doesn't match current user");
+        console.log(
+          "  ❌ Notification has recipient_id but doesn't match current user"
+        );
         return false;
       }
     }
@@ -201,7 +236,9 @@ export const RealNotificationProvider = ({ children }) => {
     const setupRealtimeSubscription = async () => {
       try {
         // Get current user info
-        const { data: { user } } = await supabase.auth.getUser();
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
         if (user) {
           const userInfo = {
             id: user.id,
@@ -230,7 +267,10 @@ export const RealNotificationProvider = ({ children }) => {
               table: "notifications_tbl",
             },
             (payload) => {
-              console.log("🆕 New notification received via realtime:", payload);
+              console.log(
+                "🆕 New notification received via realtime:",
+                payload
+              );
 
               // Check if notification is for current user BEFORE adding to state
               if (!isNotificationForCurrentUser(payload.new, userInfo)) {
@@ -254,10 +294,16 @@ export const RealNotificationProvider = ({ children }) => {
                 icon: payload.new.icon,
               };
 
-              console.log("✅ Adding notification to state:", newNotification.title);
+              console.log(
+                "✅ Adding notification to state:",
+                newNotification.title
+              );
 
               // Add to notifications list
-              setNotifications((prev) => [newNotification, ...prev.slice(0, 49)]);
+              setNotifications((prev) => [
+                newNotification,
+                ...prev.slice(0, 49),
+              ]);
               setUnreadCount((prev) => prev + 1);
 
               // Show browser notification if permission granted
@@ -298,8 +344,14 @@ export const RealNotificationProvider = ({ children }) => {
                 clearTimeout(reconnectTimeout);
                 reconnectTimeout = null;
               }
-            } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
-              console.error(`❌ Real-time subscription ${status}! Will attempt to reconnect...`);
+            } else if (
+              status === "CHANNEL_ERROR" ||
+              status === "TIMED_OUT" ||
+              status === "CLOSED"
+            ) {
+              console.error(
+                `❌ Real-time subscription ${status}! Will attempt to reconnect...`
+              );
               // Attempt to reconnect after 5 seconds
               reconnectTimeout = setTimeout(() => {
                 console.log("🔄 Attempting to reconnect...");

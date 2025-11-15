@@ -14,33 +14,54 @@ export default function ProtectedRoute({ children, requiredRoles = [] }) {
   useEffect(() => {
     const checkAuth = async () => {
       try {
-        // Get current session
+        // Refresh session to get latest state
         const {
           data: { session },
           error,
         } = await supabase.auth.getSession();
 
+        console.log("🔍 ProtectedRoute - Session check:", {
+          hasSession: !!session,
+          error: error?.message,
+          pathname
+        });
+
         // If no session, redirect based on current route
         if (!session || error) {
-          if (pathname === '/dashboard') {
-            console.log("❌ No session found on dashboard, redirecting to homepage");
-            router.replace("/");
-          } else {
-            console.log("❌ No session found, redirecting to login");
-            router.replace("/login");
-          }
+          console.log("❌ No session found, redirecting to login");
+          setIsAuthorized(false);
+          setIsLoading(false);
+          // Use window.location for hard redirect
+          window.location.href = "/login";
           return;
         }
 
         // Get user role
         const userRole = session.user?.user_metadata?.role?.toLowerCase();
-        console.log("🔐 Protected route check:", { userRole, requiredRoles });
+        console.log("🔐 Protected route check:", {
+          userRole,
+          requiredRoles,
+          pathname,
+          rawRole: session.user?.user_metadata?.role,
+          fullMetadata: session.user?.user_metadata
+        });
 
         // Check if user has required role
         if (requiredRoles.length > 0) {
           const normalizedRoles = requiredRoles.map((r) => r.toLowerCase());
+          console.log("🔍 Role check details:", {
+            userRole,
+            normalizedRoles,
+            includes: normalizedRoles.includes(userRole),
+            hasUserRole: !!userRole
+          });
+
           if (!userRole || !normalizedRoles.includes(userRole)) {
-            console.log("❌ Access denied - insufficient permissions");
+            console.log("❌ Access denied - insufficient permissions", {
+              reason: !userRole ? "No role found" : "Role not in allowed list",
+              userRole,
+              requiredRoles: normalizedRoles
+            });
             router.replace("/dashboard");
             return;
           }
@@ -67,14 +88,13 @@ export default function ProtectedRoute({ children, requiredRoles = [] }) {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, session) => {
+      console.log("🔔 Auth state change:", event, "Has session:", !!session);
+
       if (event === "SIGNED_OUT" || !session) {
-        if (pathname === '/dashboard') {
-          console.log("🔓 User signed out from dashboard, redirecting to homepage");
-          router.replace("/");
-        } else {
-          console.log("🔓 User signed out, redirecting to login");
-          router.replace("/login");
-        }
+        console.log("🔓 User signed out, forcing redirect to login");
+        setIsAuthorized(false);
+        // Force hard redirect
+        window.location.href = "/login";
       }
     });
 

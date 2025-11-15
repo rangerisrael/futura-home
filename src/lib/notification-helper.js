@@ -22,7 +22,8 @@ export async function createNotification(supabaseAdmin, notificationData) {
       recipientId = null, // Single recipient ID
       recipientIds = [], // Multiple recipient IDs
       data = {},
-      actionUrl = null,
+      actionUrl = null, // Admin/Staff action URL
+      clientActionUrl = null, // Client action URL
       sourceTable = "system",
       sourceTableDisplayName = "System",
     } = notificationData;
@@ -46,6 +47,8 @@ export async function createNotification(supabaseAdmin, notificationData) {
         recipient_id: userId,
         data: {
           ...data,
+          action_url: actionUrl, // Store admin URL in data
+          client_action_url: clientActionUrl, // Store client URL in data
           created_at: new Date().toISOString(),
         },
         action_url: actionUrl,
@@ -67,6 +70,8 @@ export async function createNotification(supabaseAdmin, notificationData) {
           recipient_id: recipientId,
           data: {
             ...data,
+            action_url: actionUrl, // Store admin URL in data
+            client_action_url: clientActionUrl, // Store client URL in data
             created_at: new Date().toISOString(),
           },
           action_url: actionUrl,
@@ -89,6 +94,8 @@ export async function createNotification(supabaseAdmin, notificationData) {
           recipient_id: null,
           data: {
             ...data,
+            action_url: actionUrl, // Store admin URL in data
+            client_action_url: clientActionUrl, // Store client URL in data
             created_at: new Date().toISOString(),
           },
           action_url: actionUrl,
@@ -172,7 +179,9 @@ export const NotificationTemplates = {
   INQUIRY_RECEIVED: (inquiryData) => ({
     type: "inquiry_received",
     title: "New Property Inquiry",
-    message: `${inquiryData.clientName} (${inquiryData.clientEmail}) sent an inquiry about ${inquiryData.propertyTitle || "a property"}.`,
+    message: `${inquiryData.clientName} (${
+      inquiryData.clientEmail
+    }) sent an inquiry about ${inquiryData.propertyTitle || "a property"}.`,
     icon: "❓",
     priority: "normal",
     recipientRole: "sales representative",
@@ -186,7 +195,9 @@ export const NotificationTemplates = {
   RESERVATION_SUBMITTED: (reservationData) => ({
     type: "reservation_submitted",
     title: "New Property Reservation",
-    message: `${reservationData.clientName} submitted a reservation for ${reservationData.propertyTitle || "a property"}. Tracking: ${reservationData.trackingNumber}`,
+    message: `${reservationData.clientName} submitted a reservation for ${
+      reservationData.propertyTitle || "a property"
+    }. Tracking: ${reservationData.trackingNumber}`,
     icon: "📅",
     priority: "high",
     recipientRole: "sales representative",
@@ -205,20 +216,28 @@ export const NotificationTemplates = {
     recipientRole: "sales representative", // This can be overridden when calling
     sourceTable: "property_reservations",
     sourceTableDisplayName: "Property Reservation",
-    actionUrl: "/client-bookings",
+    actionUrl: "/client-reservation", // Admin URL
+    clientActionUrl: "/client-reservation", // Client URL
     data: reservationData,
   }),
 
   RESERVATION_REJECTED: (reservationData) => ({
     type: "reservation_rejected",
     title: "Reservation Update",
-    message: `Your reservation (${reservationData.trackingNumber}) for ${reservationData.propertyTitle} was not approved. ${reservationData.notes ? 'Reason: ' + reservationData.notes : 'Please contact us for more information.'}`,
+    message: `Your reservation (${reservationData.trackingNumber}) for ${
+      reservationData.propertyTitle
+    } was not approved. ${
+      reservationData.notes
+        ? "Reason: " + reservationData.notes
+        : "Please contact us for more information."
+    }`,
     icon: "❌",
     priority: "high",
     recipientRole: "sales representative", // This can be overridden when calling
     sourceTable: "property_reservations",
     sourceTableDisplayName: "Property Reservation",
-    actionUrl: "/client-bookings",
+    actionUrl: "/client-reservation", // Admin URL
+    clientActionUrl: "/client-reservation", // Client URL
     data: reservationData,
   }),
 
@@ -231,7 +250,8 @@ export const NotificationTemplates = {
     recipientRole: "sales representative", // This can be overridden when calling
     sourceTable: "property_reservations",
     sourceTableDisplayName: "Property Reservation",
-    actionUrl: "/client-bookings",
+    actionUrl: "/client-reservation", // Admin URL
+    clientActionUrl: "/client-reservation", // Client URL
     data: reservationData,
   }),
 
@@ -245,7 +265,8 @@ export const NotificationTemplates = {
     recipientRole: "admin",
     sourceTable: "property_contracts",
     sourceTableDisplayName: "Property Contract",
-    actionUrl: "/client-contract-to-sell",
+    actionUrl: "/billing", // Admin URL
+    clientActionUrl: "/client-contract-to-sell", // Client URL
     data: contractData,
   }),
 
@@ -258,7 +279,8 @@ export const NotificationTemplates = {
     recipientRole: "admin",
     sourceTable: "property_contracts",
     sourceTableDisplayName: "Contract Transfer",
-    actionUrl: "/client-contract-to-sell",
+    actionUrl: "/billing", // Admin URL
+    clientActionUrl: "/client-contract-to-sell", // Client URL
     data: contractData,
   }),
 
@@ -266,7 +288,11 @@ export const NotificationTemplates = {
   PAYMENT_RECEIVED: (paymentData) => ({
     type: "payment_received",
     title: "Payment Received",
-    message: `₱${parseFloat(paymentData.amount).toLocaleString()} payment received for ${paymentData.contractNumber}. OR#: ${paymentData.orNumber}`,
+    message: `₱${parseFloat(
+      paymentData.amount
+    ).toLocaleString()} payment received for ${
+      paymentData.contractNumber
+    }. OR#: ${paymentData.orNumber}`,
     icon: "💰",
     priority: "normal",
     recipientRole: "collection",
@@ -299,7 +325,8 @@ export const NotificationTemplates = {
     recipientRole: "sales representative",
     sourceTable: "tour_bookings",
     sourceTableDisplayName: "Tour Booking",
-    actionUrl: "/client-bookings",
+    actionUrl: "/reservations", // Admin URL
+    clientActionUrl: "/client-bookings", // Client URL
     data: tourData,
   }),
 
@@ -312,7 +339,8 @@ export const NotificationTemplates = {
     recipientRole: "sales representative",
     sourceTable: "tour_bookings",
     sourceTableDisplayName: "Tour Booking",
-    actionUrl: "/client-bookings",
+    actionUrl: "/reservations", // Admin URL
+    clientActionUrl: "/client-bookings", // Client URL
     data: tourData,
   }),
 
@@ -328,6 +356,160 @@ export const NotificationTemplates = {
     sourceTableDisplayName: "Announcement",
     actionUrl: "/homeowner-announcement",
     data: announcementData,
+  }),
+
+  // Service Requests
+  SERVICE_REQUEST_CREATED: (requestData) => ({
+    type: "service_request_created",
+    title: "New Service Request",
+    message: `${requestData.clientName} submitted a service request: "${requestData.title}".`,
+    icon: "🔧",
+    priority: "normal",
+    recipientRole: "admin",
+    sourceTable: "request_tbl",
+    sourceTableDisplayName: "Service Request",
+    actionUrl: "/service-requests",
+    data: requestData,
+  }),
+
+  SERVICE_REQUEST_APPROVED: (requestData) => ({
+    type: "service_request_approved",
+    title: "Service Request Approved",
+    message: `Your service request "${requestData.title}" has been approved and is now in progress.`,
+    icon: "✅",
+    priority: "high",
+    recipientRole: "home owner",
+    sourceTable: "request_tbl",
+    sourceTableDisplayName: "Service Request",
+    actionUrl: "/service-requests", // Admin URL
+    clientActionUrl: "/client-requests", // Client URL
+    data: requestData,
+  }),
+
+  SERVICE_REQUEST_COMPLETED: (requestData) => ({
+    type: "service_request_completed",
+    title: "Service Request Completed",
+    message: `Your service request "${requestData.title}" has been completed.`,
+    icon: "✅",
+    priority: "normal",
+    recipientRole: "home owner",
+    sourceTable: "request_tbl",
+    sourceTableDisplayName: "Service Request",
+    actionUrl: "/service-requests", // Admin URL
+    clientActionUrl: "/client-requests", // Client URL
+    data: requestData,
+  }),
+
+  SERVICE_REQUEST_DECLINED: (requestData) => ({
+    type: "service_request_declined",
+    title: "Service Request Declined",
+    message: `Your service request "${requestData.title}" has been declined.`,
+    icon: "❌",
+    priority: "high",
+    recipientRole: "home owner",
+    sourceTable: "request_tbl",
+    sourceTableDisplayName: "Service Request",
+    actionUrl: "/service-requests", // Admin URL
+    clientActionUrl: "/client-requests", // Client URL
+    data: requestData,
+  }),
+
+  SERVICE_REQUEST_REVERTED: (requestData) => ({
+    type: "service_request_reverted",
+    title: "Service Request Status Updated",
+    message: `Your service request "${requestData.title}" has been reverted to pending for review.`,
+    icon: "🔄",
+    priority: "normal",
+    recipientRole: "home owner",
+    sourceTable: "request_tbl",
+    sourceTableDisplayName: "Service Request",
+    actionUrl: "/service-requests", // Admin URL
+    clientActionUrl: "/client-requests", // Client URL
+    data: requestData,
+  }),
+
+  // Complaints
+  COMPLAINT_FILED: (complaintData) => ({
+    type: "complaint_filed",
+    title: "New Complaint Filed",
+    message: `${complaintData.clientName} filed a complaint: "${complaintData.subject}".`,
+    icon: "⚠️",
+    priority: "high",
+    recipientRole: "admin",
+    sourceTable: "complaint_tbl",
+    sourceTableDisplayName: "Complaint",
+    actionUrl: "/complaints",
+    data: complaintData,
+  }),
+
+  COMPLAINT_APPROVED: (complaintData) => ({
+    type: "complaint_approved",
+    title: "Complaint Under Investigation",
+    message: `Your complaint "${complaintData.subject}" has been approved and is now under investigation.`,
+    icon: "🔍",
+    priority: "high",
+    recipientRole: "home owner",
+    sourceTable: "complaint_tbl",
+    sourceTableDisplayName: "Complaint",
+    actionUrl: "/complaints", // Admin URL
+    clientActionUrl: "/client-complaints", // Client URL
+    data: complaintData,
+  }),
+
+  COMPLAINT_RESOLVED: (complaintData) => ({
+    type: "complaint_resolved",
+    title: "Complaint Resolved",
+    message: `Your complaint "${complaintData.subject}" has been resolved.`,
+    icon: "✅",
+    priority: "high",
+    recipientRole: "home owner",
+    sourceTable: "complaint_tbl",
+    sourceTableDisplayName: "Complaint",
+    actionUrl: "/complaints", // Admin URL
+    clientActionUrl: "/client-complaints", // Client URL
+    data: complaintData,
+  }),
+
+  COMPLAINT_REJECTED: (complaintData) => ({
+    type: "complaint_rejected",
+    title: "Complaint Closed",
+    message: `Your complaint "${complaintData.subject}" has been reviewed and closed.`,
+    icon: "❌",
+    priority: "high",
+    recipientRole: "home owner",
+    sourceTable: "complaint_tbl",
+    sourceTableDisplayName: "Complaint",
+    actionUrl: "/complaints", // Admin URL
+    clientActionUrl: "/client-complaints", // Client URL
+    data: complaintData,
+  }),
+
+  COMPLAINT_ESCALATED: (complaintData) => ({
+    type: "complaint_escalated",
+    title: "Complaint Escalated",
+    message: `Your complaint "${complaintData.subject}" has been escalated for further review.`,
+    icon: "🚨",
+    priority: "urgent",
+    recipientRole: "home owner",
+    sourceTable: "complaint_tbl",
+    sourceTableDisplayName: "Complaint",
+    actionUrl: "/complaints", // Admin URL
+    clientActionUrl: "/client-complaints", // Client URL
+    data: complaintData,
+  }),
+
+  COMPLAINT_REVERTED: (complaintData) => ({
+    type: "complaint_reverted",
+    title: "Complaint Status Updated",
+    message: `Your complaint "${complaintData.subject}" has been reverted to pending for review.`,
+    icon: "🔄",
+    priority: "normal",
+    recipientRole: "home owner",
+    sourceTable: "complaint_tbl",
+    sourceTableDisplayName: "Complaint",
+    actionUrl: "/complaints", // Admin URL
+    clientActionUrl: "/client-complaints", // Client URL
+    data: complaintData,
   }),
 
   // Generic

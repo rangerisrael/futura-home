@@ -215,12 +215,7 @@ const navigationItems = [
     url: "/notifications",
     icon: Bell,
     countKey: null,
-    roles: [
-      "admin",
-      "customer service",
-      "sales representative",
-      "collection",
-    ],
+    roles: ["admin", "customer service", "sales representative", "collection"],
   },
   {
     title: "Settings",
@@ -287,7 +282,7 @@ const navigationItems = [
     url: "/property-map",
     icon: MapPin,
     countKey: null,
-    roles: ["admin", "sales representative", "home owner"],
+    roles: ["admin", "sales representative"],
   },
 
   // {

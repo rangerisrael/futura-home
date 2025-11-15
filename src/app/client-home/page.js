@@ -30,18 +30,29 @@ import {
   FileText,
   CheckCircle,
   AlertCircle,
+  Wrench,
+  MessageSquare,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { createClient } from "@supabase/supabase-js";
 import { toast } from "react-toastify";
 import { useClientAuth } from "@/contexts/ClientAuthContext";
+import { createClient } from "@supabase/supabase-js";
 import Link from "next/link";
-import RealNotificationBell from '@/components/ui/RealNotificationBell';
+import RealNotificationBell from "@/components/ui/RealNotificationBell";
 
-// Initialize Supabase client
+// Initialize Supabase client with proper persistence
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+  {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+      storageKey: 'futura-client-auth',
+      storage: typeof window !== 'undefined' ? window.localStorage : undefined,
+    },
+  }
 );
 
 export default function ClientLandingPage() {
@@ -163,10 +174,11 @@ export default function ClientLandingPage() {
       if (error) throw error;
 
       // Fetch approved reservations
-      const { data: reservationsData, error: reservationsError } = await supabase
-        .from("property_reservations")
-        .select("property_id, status")
-        .eq("status", "approved");
+      const { data: reservationsData, error: reservationsError } =
+        await supabase
+          .from("property_reservations")
+          .select("property_id, status")
+          .eq("status", "approved");
 
       if (reservationsError) {
         console.error("Error fetching reservations:", reservationsError);
@@ -663,6 +675,22 @@ export default function ClientLandingPage() {
                         <Calendar className="mr-3 h-4 w-4" />
                         <span>My Bookings</span>
                       </Link>
+                      <Link
+                        href="/client-requests"
+                        className="flex items-center px-4 py-2 text-slate-700 hover:bg-slate-50 transition-colors"
+                        onClick={() => setShowProfileMenu(false)}
+                      >
+                        <Wrench className="mr-3 h-4 w-4" />
+                        <span>My Requests</span>
+                      </Link>
+                      <Link
+                        href="/client-complaints"
+                        className="flex items-center px-4 py-2 text-slate-700 hover:bg-slate-50 transition-colors"
+                        onClick={() => setShowProfileMenu(false)}
+                      >
+                        <MessageSquare className="mr-3 h-4 w-4" />
+                        <span>My Complaints</span>
+                      </Link>
                       <button
                         onClick={() => {
                           setShowProfileMenu(false);
@@ -849,8 +877,16 @@ export default function ClientLandingPage() {
                           <Home className="h-20 w-20 text-slate-300" />
                         </div>
                       )}
-                      <Badge className={`absolute top-4 right-4 ${isPropertyReserved(property.property_id) ? 'bg-slate-500' : 'bg-red-600'} text-white`}>
-                        {isPropertyReserved(property.property_id) ? 'Reserved' : 'For Sale'}
+                      <Badge
+                        className={`absolute top-4 right-4 ${
+                          isPropertyReserved(property.property_id)
+                            ? "bg-slate-500"
+                            : "bg-red-600"
+                        } text-white`}
+                      >
+                        {isPropertyReserved(property.property_id)
+                          ? "Reserved"
+                          : "For Sale"}
                       </Badge>
                     </div>
 
@@ -949,7 +985,10 @@ export default function ClientLandingPage() {
                                       "Please login to reserve this property"
                                     );
                                     router.push("/client-login");
-                                  } else if (!profile?.phone || !profile?.address) {
+                                  } else if (
+                                    !profile?.phone ||
+                                    !profile?.address
+                                  ) {
                                     // Check if phone and address are in user profile
                                     toast.warning(
                                       "Please complete your profile (phone and address) before making a reservation"
@@ -997,7 +1036,8 @@ export default function ClientLandingPage() {
                                   const nameParts = fullName.trim().split(" ");
                                   setInquiryForm({
                                     firstname: nameParts[0] || "",
-                                    lastname: nameParts.slice(1).join(" ") || "",
+                                    lastname:
+                                      nameParts.slice(1).join(" ") || "",
                                     email: user?.email || "",
                                     phone: profile?.phone || "",
                                     message: "",
@@ -1263,55 +1303,74 @@ export default function ClientLandingPage() {
                   </div>
 
                   {/* Property Price and Downpayment Display */}
-                  {selectedProperty.property_price && selectedProperty.property_downprice && (
-                    <div className="space-y-3">
-                      {/* Total Property Price */}
-                      <div className="p-4 bg-blue-50 rounded-lg border border-blue-200">
-                        <div className="flex items-center justify-between">
-                          <div className="flex-1">
-                            <p className="text-sm text-slate-600 mb-1">
-                              Total Property Price:
-                            </p>
-                            <p className="text-3xl font-bold text-blue-700">
-                              {formatPriceShort(selectedProperty.property_price)}
-                            </p>
-                            <p className="text-xs text-slate-500 mt-1">
-                              {formatPrice(selectedProperty.property_price)}
-                            </p>
+                  {selectedProperty.property_price &&
+                    selectedProperty.property_downprice && (
+                      <div className="space-y-3">
+                        {/* Total Property Price */}
+                        <div className="p-4 bg-blue-50 rounded-lg border border-blue-200">
+                          <div className="flex items-center justify-between">
+                            <div className="flex-1">
+                              <p className="text-sm text-slate-600 mb-1">
+                                Total Property Price:
+                              </p>
+                              <p className="text-3xl font-bold text-blue-700">
+                                {formatPriceShort(
+                                  selectedProperty.property_price
+                                )}
+                              </p>
+                              <p className="text-xs text-slate-500 mt-1">
+                                {formatPrice(selectedProperty.property_price)}
+                              </p>
+                            </div>
                           </div>
                         </div>
-                      </div>
 
-                      {/* Reservation Fee (Downpayment) */}
-                      <div className="p-4 bg-green-50 rounded-lg border-2 border-green-300">
-                        <div className="flex items-center justify-between">
-                          <div className="flex-1">
-                            <p className="text-sm text-slate-600 mb-1">
-                              Reservation Fee:
-                            </p>
-                            <p className="text-3xl font-bold text-green-700">
-                              {formatPriceShort(selectedProperty.property_downprice)}
-                            </p>
-                            <p className="text-sm text-slate-600 mt-2 font-semibold">
-                              {((selectedProperty.property_downprice / selectedProperty.property_price) * 100).toFixed(0)}% of {formatPriceShort(selectedProperty.property_price)} = {formatPriceShort(selectedProperty.property_downprice)}
-                            </p>
-                            <p className="text-xs text-slate-500 mt-1">
-                              {formatPrice(selectedProperty.property_downprice)}
-                            </p>
-                          </div>
-                          <div className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-semibold">
-                            To Pay
+                        {/* Reservation Fee (Downpayment) */}
+                        <div className="p-4 bg-green-50 rounded-lg border-2 border-green-300">
+                          <div className="flex items-center justify-between">
+                            <div className="flex-1">
+                              <p className="text-sm text-slate-600 mb-1">
+                                Reservation Fee:
+                              </p>
+                              <p className="text-3xl font-bold text-green-700">
+                                {formatPriceShort(
+                                  selectedProperty.property_downprice
+                                )}
+                              </p>
+                              <p className="text-sm text-slate-600 mt-2 font-semibold">
+                                {(
+                                  (selectedProperty.property_downprice /
+                                    selectedProperty.property_price) *
+                                  100
+                                ).toFixed(0)}
+                                % of{" "}
+                                {formatPriceShort(
+                                  selectedProperty.property_price
+                                )}{" "}
+                                ={" "}
+                                {formatPriceShort(
+                                  selectedProperty.property_downprice
+                                )}
+                              </p>
+                              <p className="text-xs text-slate-500 mt-1">
+                                {formatPrice(
+                                  selectedProperty.property_downprice
+                                )}
+                              </p>
+                            </div>
+                            <div className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-semibold">
+                              To Pay
+                            </div>
                           </div>
                         </div>
                       </div>
-                    </div>
-                  )}
+                    )}
 
                   {!selectedProperty.property_price && (
                     <div className="p-4 bg-blue-50 rounded-lg border border-blue-200">
                       <p className="text-sm text-blue-800">
-                        💡 Pricing information will be discussed during application
-                        review
+                        💡 Pricing information will be discussed during
+                        application review
                       </p>
                     </div>
                   )}
@@ -2229,7 +2288,14 @@ export default function ClientLandingPage() {
                             Reservation Fee
                           </span>
                           <span className="text-sm text-slate-700 font-semibold mt-1 block">
-                            {((receiptData.reservation_fee / receiptData.property_price) * 100).toFixed(0)}% of {formatPriceShort(receiptData.property_price || 0)} = {formatPriceShort(receiptData.reservation_fee)}
+                            {(
+                              (receiptData.reservation_fee /
+                                receiptData.property_price) *
+                              100
+                            ).toFixed(0)}
+                            % of{" "}
+                            {formatPriceShort(receiptData.property_price || 0)}{" "}
+                            = {formatPriceShort(receiptData.reservation_fee)}
                           </span>
                           <span className="text-xs text-slate-500 block">
                             {formatPrice(receiptData.reservation_fee)}

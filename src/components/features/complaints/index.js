@@ -7,10 +7,11 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import ReactSelect from "react-select";
-import { Plus, Search, AlertTriangle, Building2, User, X, Edit, Trash2, AlertTriangle as AlertTriangleIcon, Loader2, Sparkles } from "lucide-react";
+import { Plus, Search, AlertTriangle, Building2, User, X, Edit, Trash2, AlertTriangle as AlertTriangleIcon, Loader2, Sparkles, Eye, CheckCircle, XCircle, Ban, RotateCcw } from "lucide-react";
 import { motion } from "framer-motion";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 import { formattedDate, isNewItem, getRelativeTime } from "@/lib/utils";
+import { toast } from "react-toastify";
 
 // Initialize Supabase client
 const supabase = createClientComponentClient();
@@ -27,9 +28,11 @@ export default function Complaints() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [formSubmitting, setFormSubmitting] = useState(false);
   const [editingComplaint, setEditingComplaint] = useState(null);
   const [deletingComplaint, setDeletingComplaint] = useState(null);
+  const [viewingComplaint, setViewingComplaint] = useState(null);
 
   // Form state
   const [formData, setFormData] = useState({
@@ -38,7 +41,7 @@ export default function Complaints() {
     complaint_type: '',
     severity: 'medium',
     status: 'pending',
-    homeowner_id: '',
+    contract_id: '', // Changed from homeowner_id to contract_id
     property_id: '',
     created_date: new Date().toISOString()
   });
@@ -54,14 +57,14 @@ export default function Complaints() {
   const loadData = async () => {
     try {
       setLoading(true);
-      
+
       // Fetch complaints with related data
       const { data: complaintsData, error: complaintsError } = await supabase
         .from('complaint_tbl')
         .select(`
           *,
-          homeowner_tbl:homeowner_id(*),
-          properties:property_id(*)
+          property_contracts!contract_id(contract_id, client_name),
+          property_info_tbl!property_id(property_id, property_title)
         `)
         .order('created_date', { ascending: false });
 
@@ -69,72 +72,61 @@ export default function Complaints() {
 
       // Fetch properties for dropdown
       const { data: propertiesData, error: propertiesError } = await supabase
-        .from('properties')
-        .select('*')
-        .order('name');
+        .from('property_info_tbl')
+        .select('property_id, property_title')
+        .order('property_title');
 
       if (propertiesError) throw propertiesError;
 
-      // Load homeowners who have contracts only
-      const homeownersResponse = await fetch("/api/homeowners/with-contracts");
-      const homeownersResult = await homeownersResponse.json();
+      // Load contracts (which link homeowners to properties) for the dropdown
+      const { data: contractsData, error: contractsError } = await supabase
+        .from("property_contracts")
+        .select(`
+          contract_id,
+          client_name,
+          client_email,
+          property_id,
+          property_title,
+          contract_status
+        `)
+        .in("contract_status", ["active", "pending", "completed"])
+        .order("client_name");
 
-      const homeownersData = homeownersResult.success ? homeownersResult.data : [];
+      if (contractsError) throw contractsError;
 
-      console.log("✅ Loaded homeowners with contracts:", homeownersData.length);
+      console.log("✅ Loaded contracts:", contractsData?.length || 0);
 
       setComplaints(complaintsData || []);
       setProperties(propertiesData || []);
-      setHomeowners(homeownersData || []);
+      setHomeowners(contractsData || []); // Using contracts as "homeowners" for the dropdown
     } catch (error) {
       console.error('Error loading data:', error);
+      toast.error('Error loading data: ' + error.message);
     } finally {
       setLoading(false);
     }
   };
 
-  const filterComplaints = async () => {
-    try {
-      let query = supabase
-        .from('complaint_tbl')
-        .select(`
-          *,
-          homeowner:homeowner_id(*),
-          property:property_id(*)
-        `)
-        .order('created_date', { ascending: false });
+  const filterComplaints = () => {
+    let filtered = complaints;
 
-      // Apply filters
-      if (searchTerm) {
-        query = query.ilike('subject', `%${searchTerm}%`);
-      }
-      if (statusFilter !== "all") {
-        query = query.eq('status', statusFilter);
-      }
-      if (severityFilter !== "all") {
-        query = query.eq('severity', severityFilter);
-      }
-
-      const { data, error } = await query;
-      
-      if (error) throw error;
-      
-      setFilteredComplaints(data || []);
-    } catch (error) {
-      console.error('Error filtering complaints:', error);
-      // Fallback to client-side filtering if needed
-      let filtered = complaints;
-      if (searchTerm) {
-        filtered = filtered.filter(c => c.subject.toLowerCase().includes(searchTerm.toLowerCase()));
-      }
-      if (statusFilter !== "all") {
-        filtered = filtered.filter(c => c.status === statusFilter);
-      }
-      if (severityFilter !== "all") {
-        filtered = filtered.filter(c => c.severity === severityFilter);
-      }
-      setFilteredComplaints(filtered);
+    if (searchTerm) {
+      filtered = filtered.filter(c =>
+        c.subject.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        c.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (c.property_contracts?.client_name && c.property_contracts.client_name.toLowerCase().includes(searchTerm.toLowerCase()))
+      );
     }
+
+    if (statusFilter !== "all") {
+      filtered = filtered.filter(c => c.status === statusFilter);
+    }
+
+    if (severityFilter !== "all") {
+      filtered = filtered.filter(c => c.severity === severityFilter);
+    }
+
+    setFilteredComplaints(filtered);
   };
 
   const handleInputChange = (e) => {
@@ -152,17 +144,18 @@ export default function Complaints() {
     }));
   };
 
-  const handleHomeownerChange = (selectedOption) => {
+  const handleContractChange = (selectedOption) => {
     if (!selectedOption) {
-      setFormData(prev => ({ ...prev, homeowner_id: '', property_id: '' }));
+      setFormData(prev => ({ ...prev, contract_id: '', property_id: '' }));
       return;
     }
 
-    // Clear property_id when homeowner changes so user must select property
+    // Find the selected contract and set both contract_id and property_id
+    const selectedContract = homeowners.find(h => h.contract_id === selectedOption.value);
     setFormData(prev => ({
       ...prev,
-      homeowner_id: selectedOption.value,
-      property_id: '' // Reset property when homeowner changes
+      contract_id: selectedOption.value,
+      property_id: selectedContract?.property_id || ''
     }));
   };
 
@@ -175,7 +168,7 @@ export default function Complaints() {
       complaint_type: complaint.complaint_type,
       severity: complaint.severity,
       status: complaint.status,
-      homeowner_id: complaint.homeowner_id?.toString() || '',
+      contract_id: complaint.contract_id?.toString() || '', // Changed from homeowner_id
       property_id: complaint.property_id?.toString() || '',
       created_date: complaint.created_date
     });
@@ -206,6 +199,128 @@ export default function Complaints() {
     }
   };
 
+  // Handle opening view modal
+  const handleViewComplaint = (complaint) => {
+    setViewingComplaint(complaint);
+    setIsViewModalOpen(true);
+  };
+
+  // Handle approve complaint
+  const handleApproveComplaint = async (complaint) => {
+    try {
+      // Call API to update status and trigger notification
+      const response = await fetch('/api/complaints', {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          id: complaint.id,
+          status: 'investigating',
+        }),
+      });
+
+      const result = await response.json();
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to approve complaint');
+      }
+
+      // Update local state
+      await loadData();
+      toast.success('Complaint approved and moved to investigating!');
+    } catch (error) {
+      console.error('Error approving complaint:', error);
+      toast.error('Error approving complaint: ' + error.message);
+    }
+  };
+
+  // Handle reject complaint
+  const handleRejectComplaint = async (complaint) => {
+    try {
+      // Call API to update status and trigger notification
+      const response = await fetch('/api/complaints', {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          id: complaint.id,
+          status: 'closed',
+        }),
+      });
+
+      const result = await response.json();
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to reject complaint');
+      }
+
+      // Update local state
+      await loadData();
+      toast.success('Complaint rejected and closed!');
+    } catch (error) {
+      console.error('Error rejecting complaint:', error);
+      toast.error('Error rejecting complaint: ' + error.message);
+    }
+  };
+
+  // Handle decline complaint
+  const handleDeclineComplaint = async (complaint) => {
+    try {
+      // Call API to update status and trigger notification
+      const response = await fetch('/api/complaints', {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          id: complaint.id,
+          status: 'escalated',
+        }),
+      });
+
+      const result = await response.json();
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to decline complaint');
+      }
+
+      // Update local state
+      await loadData();
+      toast.info('Complaint declined and escalated!');
+    } catch (error) {
+      console.error('Error declining complaint:', error);
+      toast.error('Error declining complaint: ' + error.message);
+    }
+  };
+
+  // Handle revert complaint to pending
+  const handleRevertComplaint = async (complaint) => {
+    try {
+      // Call API to update status and trigger notification
+      const response = await fetch('/api/complaints', {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          id: complaint.id,
+          status: 'pending',
+        }),
+      });
+
+      const result = await response.json();
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to revert complaint');
+      }
+
+      // Update local state
+      await loadData();
+      toast.success('Complaint reverted to pending!');
+    } catch (error) {
+      console.error('Error reverting complaint:', error);
+      toast.error('Error reverting complaint: ' + error.message);
+    }
+  };
+
   // Update complaint function
   const updateComplaint = async (complaintId, updateData) => {
     try {
@@ -215,17 +330,17 @@ export default function Complaints() {
         .eq('id', complaintId)
         .select(`
           *,
-          homeowner_tbl:homeowner_id(*),
-          properties:property_id(*)
+          property_contracts!contract_id(contract_id, client_name),
+          property_info_tbl!property_id(property_id, property_title)
         `)
         .single();
 
       if (error) throw error;
 
       // Update local state
-      setComplaints(prev => 
-        prev.map(complaint => 
-          complaint.id === complaintId 
+      setComplaints(prev =>
+        prev.map(complaint =>
+          complaint.id === complaintId
             ? { ...complaint, ...data }
             : complaint
         )
@@ -266,7 +381,7 @@ export default function Complaints() {
       complaint_type: '',
       severity: 'medium',
       status: 'pending',
-      homeowner_id: '',
+      contract_id: '', // Changed from homeowner_id
       property_id: '',
       created_date: new Date().toISOString()
     });
@@ -277,6 +392,19 @@ export default function Complaints() {
     setFormSubmitting(true);
 
     try {
+      // Validate required fields
+      if (!formData.subject || !formData.description || !formData.complaint_type) {
+        toast.error("Please fill in all required fields");
+        setFormSubmitting(false);
+        return;
+      }
+
+      if (!formData.contract_id) {
+        toast.error("Please select a homeowner");
+        setFormSubmitting(false);
+        return;
+      }
+
       if (editingComplaint) {
         // Update existing complaint
         const updateData = {
@@ -285,11 +413,11 @@ export default function Complaints() {
           complaint_type: formData.complaint_type,
           severity: formData.severity,
           status: formData.status,
-          homeowner_id: parseInt(formData.homeowner_id),
-          property_id: parseInt(formData.property_id)
+          contract_id: formData.contract_id,
+          property_id: formData.property_id
         };
-        
-        const data = await updateComplaint(editingComplaint.id, updateData);
+
+        await updateComplaint(editingComplaint.id, updateData);
         toast.success('Complaint updated successfully!');
         setIsEditModalOpen(false);
         setEditingComplaint(null);
@@ -303,38 +431,41 @@ export default function Complaints() {
             complaint_type: formData.complaint_type,
             severity: formData.severity,
             status: formData.status,
-            homeowner_id: parseInt(formData.homeowner_id),
-            property_id: parseInt(formData.property_id),
+            contract_id: formData.contract_id,
+            property_id: formData.property_id,
             created_date: new Date().toISOString()
           }])
-          .select();
+          .select(`
+            *,
+            property_contracts!contract_id(contract_id, client_name),
+            property_info_tbl!property_id(property_id, property_title)
+          `);
 
         if (error) throw error;
 
+        setComplaints(prev => [data[0], ...prev]);
         setIsModalOpen(false);
-        
-        // Reload data to show new complaint
-        await loadData();
-        
+
         toast.success('Complaint filed successfully!');
       }
 
       // Reset form
       resetForm();
+      await loadData(); // Reload to ensure fresh state
     } catch (error) {
       console.error('Error submitting complaint:', error);
-      toast.error('Error filing complaint. Please try again.');
+      toast.error('Error filing complaint: ' + (error.message || 'Unknown error'));
     } finally {
       setFormSubmitting(false);
     }
   };
 
   const getPropertyName = (complaint) => {
-    return complaint.property?.name || 'N/A';
+    return complaint.property_info_tbl?.property_title || 'N/A';
   };
-  
+
   const getHomeownerName = (complaint) => {
-    return complaint.homeowner?.full_name || 'N/A';
+    return complaint.property_contracts?.client_name || 'N/A';
   };
   
   const getStatusColor = (status) => {
@@ -409,8 +540,8 @@ export default function Complaints() {
         </motion.div>
 
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }}>
-          {loading ? ( 
-            <div className="text-center py-12">Loading complaints...</div> 
+          {loading ? (
+            <div className="text-center py-12">Loading complaints...</div>
           ) : filteredComplaints.length === 0 ? (
             <div className="text-center py-16">
               <div className="w-24 h-24 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-6">
@@ -420,69 +551,140 @@ export default function Complaints() {
               <p className="text-slate-600">No complaints match the current filters.</p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {filteredComplaints.map((complaint, index) => (
-                <motion.div key={complaint.id} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: index * 0.05 }}>
-                  <Card className="bg-white/80 backdrop-blur-sm border-slate-200 hover:shadow-xl hover:shadow-slate-200/50 transition-all duration-500 hover:-translate-y-1">
-                    <CardHeader className="pb-4">
-                      <div className="flex items-start justify-between gap-4">
-                        <CardTitle className="text-lg text-slate-900 line-clamp-1">{complaint.subject}</CardTitle>
-                        <div className="flex items-center gap-2">
-                          <Badge className={`${getStatusColor(complaint.status)} border capitalize`}>{complaint.status}</Badge>
-                          {isNewItem(complaint.created_date) && (
-                            <Badge className="bg-gradient-to-r from-emerald-500 to-emerald-600 text-white border-0 shadow-md animate-pulse">
-                              <Sparkles className="w-3 h-3 mr-1" />
-                              New
-                            </Badge>
-                          )}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Badge variant="secondary" className={`${getSeverityColor(complaint.severity)} capitalize`}>{complaint.severity}</Badge>
-                        <Badge variant="outline" className="capitalize">{complaint.complaint_type}</Badge>
-                      </div>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                      <p className="text-slate-700 text-sm line-clamp-3">{complaint.description}</p>
-                      <div className="bg-slate-50 rounded-xl p-4 space-y-3 text-sm">
-                        <div className="flex items-center gap-2 text-slate-600">
-                          <User className="w-4 h-4" />
-                          <span>Filed by: {getHomeownerName(complaint)}</span>
-                        </div>
-                        <div className="flex items-center gap-2 text-slate-600">
-                          <Building2 className="w-4 h-4" />
-                          <span>Property: {getPropertyName(complaint)}</span>
-                        </div>
-                      </div>
-                      <div className="text-xs text-slate-500 pt-3 border-t border-slate-200">
-                        Filed on {formattedDate(new Date(complaint.created_date), "MMM d, yyyy, p")}
-                      </div>
-
-                      {/* Action Buttons */}
-                      <div className="flex gap-2 pt-3 mt-3 border-t border-slate-200">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="flex-1 text-blue-600 border-blue-200 hover:bg-blue-50"
-                          onClick={() => handleEditComplaint(complaint)}
-                        >
-                          <Edit className="w-4 h-4 mr-1" />
-                          Edit
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="flex-1 text-red-600 border-red-200 hover:bg-red-50"
-                          onClick={() => handleDeleteComplaint(complaint)}
-                        >
-                          <Trash2 className="w-4 h-4 mr-1" />
-                          Delete
-                        </Button>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </motion.div>
-              ))}
+            <div className="bg-white/80 backdrop-blur-sm border border-slate-200 rounded-2xl shadow-lg overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-gradient-to-r from-slate-50 to-slate-100 border-b border-slate-200">
+                    <tr>
+                      <th className="px-6 py-4 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Subject</th>
+                      <th className="px-6 py-4 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Type</th>
+                      <th className="px-6 py-4 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Filed By</th>
+                      <th className="px-6 py-4 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Property</th>
+                      <th className="px-6 py-4 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Severity</th>
+                      <th className="px-6 py-4 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Status</th>
+                      <th className="px-6 py-4 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Filed Date</th>
+                      <th className="px-6 py-4 text-center text-xs font-semibold text-slate-700 uppercase tracking-wider">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200">
+                    {filteredComplaints.map((complaint, index) => (
+                      <motion.tr
+                        key={complaint.id}
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        transition={{ delay: index * 0.02 }}
+                        className="hover:bg-slate-50 transition-colors"
+                      >
+                        <td className="px-6 py-4">
+                          <div className="flex items-center gap-2">
+                            <div>
+                              <div className="font-medium text-slate-900">{complaint.subject}</div>
+                              <div className="text-xs text-slate-500 mt-1 line-clamp-1">{complaint.description}</div>
+                            </div>
+                            {isNewItem(complaint.created_date) && (
+                              <Badge className="bg-gradient-to-r from-emerald-500 to-emerald-600 text-white border-0 shadow-md animate-pulse text-xs">
+                                <Sparkles className="w-3 h-3 mr-1" />
+                                New
+                              </Badge>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <Badge variant="outline" className="capitalize text-xs">
+                            {complaint.complaint_type}
+                          </Badge>
+                        </td>
+                        <td className="px-6 py-4 text-sm text-slate-700">{getHomeownerName(complaint)}</td>
+                        <td className="px-6 py-4 text-sm text-slate-700">{getPropertyName(complaint)}</td>
+                        <td className="px-6 py-4">
+                          <Badge variant="secondary" className={`${getSeverityColor(complaint.severity)} capitalize text-xs`}>
+                            {complaint.severity}
+                          </Badge>
+                        </td>
+                        <td className="px-6 py-4">
+                          <Badge className={`${getStatusColor(complaint.status)} border capitalize text-xs`}>
+                            {complaint.status}
+                          </Badge>
+                        </td>
+                        <td className="px-6 py-4 text-sm text-slate-600">
+                          {formattedDate(new Date(complaint.created_date), "MMM d, yyyy")}
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="flex items-center justify-center gap-1">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-8 w-8 p-0 text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50"
+                              onClick={() => handleViewComplaint(complaint)}
+                              title="View"
+                            >
+                              <Eye className="w-4 h-4" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-8 w-8 p-0 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                              onClick={() => handleEditComplaint(complaint)}
+                              title="Edit"
+                            >
+                              <Edit className="w-4 h-4" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-8 w-8 p-0 text-green-600 hover:text-green-700 hover:bg-green-50"
+                              onClick={() => handleApproveComplaint(complaint)}
+                              disabled={complaint.status !== 'pending'}
+                              title="Approve"
+                            >
+                              <CheckCircle className="w-4 h-4" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
+                              onClick={() => handleRejectComplaint(complaint)}
+                              disabled={complaint.status === 'closed'}
+                              title="Reject"
+                            >
+                              <XCircle className="w-4 h-4" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-8 w-8 p-0 text-orange-600 hover:text-orange-700 hover:bg-orange-50"
+                              onClick={() => handleDeclineComplaint(complaint)}
+                              disabled={complaint.status === 'escalated'}
+                              title="Decline"
+                            >
+                              <Ban className="w-4 h-4" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-8 w-8 p-0 text-purple-600 hover:text-purple-700 hover:bg-purple-50"
+                              onClick={() => handleRevertComplaint(complaint)}
+                              disabled={complaint.status === 'pending'}
+                              title="Revert to Pending"
+                            >
+                              <RotateCcw className="w-4 h-4" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-8 w-8 p-0 text-slate-600 hover:text-slate-700 hover:bg-slate-50"
+                              onClick={() => handleDeleteComplaint(complaint)}
+                              title="Delete"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          </div>
+                        </td>
+                      </motion.tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
         </motion.div>
@@ -587,95 +789,45 @@ export default function Complaints() {
                       Homeowner <span className="text-red-500">*</span>
                     </Label>
                     <ReactSelect
-                      className="mt-2"
-                      options={homeowners.map(homeowner => ({
-                        value: homeowner.id,
-                        label: `${homeowner.full_name} (${homeowner.email})`
+                      className="mt-2 react-select-container"
+                      classNamePrefix="react-select"
+                      options={homeowners.map(contract => ({
+                        value: contract.contract_id,
+                        label: `${contract.client_name} - ${contract.property_title || 'No property'}`
                       }))}
                       value={
-                        formData.homeowner_id
+                        formData.contract_id
                           ? {
-                              value: formData.homeowner_id,
-                              label: homeowners.find(h => h.id === formData.homeowner_id)
-                                ? `${homeowners.find(h => h.id === formData.homeowner_id).full_name} (${homeowners.find(h => h.id === formData.homeowner_id).email})`
+                              value: formData.contract_id,
+                              label: homeowners.find(h => h.contract_id?.toString() === formData.contract_id.toString())
+                                ? `${homeowners.find(h => h.contract_id?.toString() === formData.contract_id.toString()).client_name} - ${homeowners.find(h => h.contract_id?.toString() === formData.contract_id.toString()).property_title || 'No property'}`
                                 : 'Select homeowner'
                             }
                           : null
                       }
-                      onChange={handleHomeownerChange}
+                      onChange={handleContractChange}
                       placeholder="Search and select a homeowner..."
                       isClearable
                       isSearchable
-                      styles={{
-                        control: (base) => ({
-                          ...base,
-                          minHeight: '44px',
-                          borderRadius: '0.75rem',
-                          borderColor: '#cbd5e1',
-                          backgroundColor: '#f8fafc'
-                        })
-                      }}
                     />
                   </div>
 
                   <div className="space-y-2">
                     <Label htmlFor="property" className="text-sm font-bold text-slate-700 mb-2 flex items-center gap-2">
-                      Property <span className="text-red-500">*</span>
+                      Property
                     </Label>
-                    {formData.homeowner_id ? (
-                      <ReactSelect
-                        className="mt-2"
-                        options={
-                          homeowners
-                            .find((h) => h.id === formData.homeowner_id)
-                            ?.properties?.map((property) => ({
-                              value: property.property_id,
-                              label: property.property_title,
-                            })) || []
-                        }
-                        value={
-                          formData.property_id
-                            ? {
-                                value: formData.property_id,
-                                label:
-                                  homeowners
-                                    .find((h) => h.id === formData.homeowner_id)
-                                    ?.properties?.find(
-                                      (p) => p.property_id === formData.property_id
-                                    )?.property_title || "Select property",
-                              }
-                            : null
-                        }
-                        onChange={(selectedOption) =>
-                          handleInputChange({
-                            target: {
-                              name: "property_id",
-                              value: selectedOption ? selectedOption.value : "",
-                            },
-                          })
-                        }
-                        placeholder="Select homeowner's property..."
-                        isClearable
-                        isSearchable
-                        styles={{
-                          control: (base) => ({
-                            ...base,
-                            minHeight: "44px",
-                            borderRadius: "0.75rem",
-                            borderColor: "#cbd5e1",
-                          }),
-                        }}
-                      />
-                    ) : (
-                      <Input
-                        type="text"
-                        className="mt-2 h-11 bg-slate-50 border-slate-300 cursor-not-allowed rounded-xl"
-                        value=""
-                        placeholder="Select homeowner first"
-                        readOnly
-                        disabled
-                      />
-                    )}
+                    <Input
+                      type="text"
+                      className="mt-2 h-11 bg-slate-50 border-slate-300 cursor-not-allowed rounded-xl"
+                      value={
+                        formData.contract_id
+                          ? homeowners.find(h => h.contract_id?.toString() === formData.contract_id.toString())?.property_title || ''
+                          : ''
+                      }
+                      placeholder={formData.contract_id ? "Auto-filled from contract" : "Select homeowner first"}
+                      readOnly
+                      disabled
+                    />
                   </div>
                 </div>
 
@@ -862,60 +1014,42 @@ export default function Complaints() {
                       Homeowner <span className="text-red-500">*</span>
                     </Label>
                     <ReactSelect
-                      className="mt-2"
-                      options={homeowners.map(homeowner => ({
-                        value: homeowner.id.toString(),
-                        label: `${homeowner.full_name} - Unit ${homeowner.unit_number}${
-                          homeowner.property_info_tbl
-                            ? ` (${homeowner.property_info_tbl.property_title})`
-                            : ''
-                        }`
+                      className="mt-2 react-select-container"
+                      classNamePrefix="react-select"
+                      options={homeowners.map(contract => ({
+                        value: contract.contract_id,
+                        label: `${contract.client_name} - ${contract.property_title || 'No property'}`
                       }))}
                       value={
-                        formData.homeowner_id
+                        formData.contract_id
                           ? {
-                              value: formData.homeowner_id,
-                              label: homeowners.find(h => h.id.toString() === formData.homeowner_id)
-                                ? `${homeowners.find(h => h.id.toString() === formData.homeowner_id).full_name} - Unit ${
-                                    homeowners.find(h => h.id.toString() === formData.homeowner_id).unit_number
-                                  }${
-                                    homeowners.find(h => h.id.toString() === formData.homeowner_id).property_info_tbl
-                                      ? ` (${homeowners.find(h => h.id.toString() === formData.homeowner_id).property_info_tbl.property_title})`
-                                      : ''
-                                  }`
+                              value: formData.contract_id,
+                              label: homeowners.find(h => h.contract_id?.toString() === formData.contract_id.toString())
+                                ? `${homeowners.find(h => h.contract_id?.toString() === formData.contract_id.toString()).client_name} - ${homeowners.find(h => h.contract_id?.toString() === formData.contract_id.toString()).property_title || 'No property'}`
                                 : 'Select homeowner'
                             }
                           : null
                       }
-                      onChange={handleHomeownerChange}
+                      onChange={handleContractChange}
                       placeholder="Search and select a homeowner..."
                       isClearable
                       isSearchable
-                      styles={{
-                        control: (base) => ({
-                          ...base,
-                          minHeight: '44px',
-                          borderRadius: '0.75rem',
-                          borderColor: '#cbd5e1',
-                          backgroundColor: '#f8fafc'
-                        })
-                      }}
                     />
                   </div>
 
                   <div className="space-y-2">
                     <Label htmlFor="edit-property" className="text-sm font-bold text-slate-700 mb-2 flex items-center gap-2">
-                      Property <span className="text-red-500">*</span>
+                      Property
                     </Label>
                     <Input
                       type="text"
                       className="mt-2 h-11 bg-slate-50 border-slate-300 cursor-not-allowed rounded-xl"
                       value={
-                        formData.property_id && homeowners.find(h => h.id.toString() === formData.homeowner_id)?.property_info_tbl
-                          ? homeowners.find(h => h.id.toString() === formData.homeowner_id).property_info_tbl.property_title
+                        formData.contract_id
+                          ? homeowners.find(h => h.contract_id?.toString() === formData.contract_id.toString())?.property_title || ''
                           : ''
                       }
-                      placeholder="Select homeowner first"
+                      placeholder={formData.contract_id ? "Auto-filled from contract" : "Select homeowner first"}
                       readOnly
                     />
                   </div>
@@ -1104,6 +1238,145 @@ export default function Complaints() {
                       Delete Complaint
                     </>
                   )}
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+
+      {/* View Complaint Modal */}
+      {isViewModalOpen && viewingComplaint && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setIsViewModalOpen(false);
+              setViewingComplaint(null);
+            }
+          }}
+        >
+          <motion.div
+            initial={{ scale: 0.95, opacity: 0, y: 20 }}
+            animate={{ scale: 1, opacity: 1, y: 0 }}
+            exit={{ scale: 0.95, opacity: 0, y: 20 }}
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden"
+          >
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-indigo-500 to-indigo-600 px-8 py-6 text-white">
+              <div className="flex justify-between items-center">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center">
+                    <Eye className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h3 className="text-2xl font-bold">View Complaint Details</h3>
+                    <p className="text-indigo-100 text-sm mt-1">Complete complaint information</p>
+                  </div>
+                </div>
+                <button
+                  className="p-2 hover:bg-white/10 rounded-lg transition-colors"
+                  onClick={() => {
+                    setIsViewModalOpen(false);
+                    setViewingComplaint(null);
+                  }}
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-8 overflow-y-auto max-h-[calc(90vh-140px)]">
+              <div className="space-y-6">
+                <div className="flex gap-3">
+                  <Badge className={`${getStatusColor(viewingComplaint.status)} border capitalize`}>
+                    {viewingComplaint.status}
+                  </Badge>
+                  <Badge variant="secondary" className={`${getSeverityColor(viewingComplaint.severity)} capitalize`}>
+                    {viewingComplaint.severity}
+                  </Badge>
+                  <Badge variant="outline" className="capitalize">
+                    {viewingComplaint.complaint_type}
+                  </Badge>
+                </div>
+
+                <div className="bg-slate-50 rounded-xl p-6 space-y-4">
+                  <div>
+                    <h4 className="text-sm font-semibold text-slate-700 mb-2">Subject</h4>
+                    <p className="text-slate-900 font-medium">{viewingComplaint.subject}</p>
+                  </div>
+
+                  <div>
+                    <h4 className="text-sm font-semibold text-slate-700 mb-2">Description</h4>
+                    <p className="text-slate-900">{viewingComplaint.description}</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="bg-white border border-slate-200 rounded-xl p-4">
+                    <div className="flex items-center gap-2 text-slate-600 mb-2">
+                      <User className="w-4 h-4" />
+                      <h4 className="text-sm font-semibold">Filed By</h4>
+                    </div>
+                    <p className="text-slate-900">{getHomeownerName(viewingComplaint)}</p>
+                  </div>
+
+                  <div className="bg-white border border-slate-200 rounded-xl p-4">
+                    <div className="flex items-center gap-2 text-slate-600 mb-2">
+                      <Building2 className="w-4 h-4" />
+                      <h4 className="text-sm font-semibold">Property</h4>
+                    </div>
+                    <p className="text-slate-900">{getPropertyName(viewingComplaint)}</p>
+                  </div>
+
+                  <div className="bg-white border border-slate-200 rounded-xl p-4">
+                    <h4 className="text-sm font-semibold text-slate-700 mb-2">Filed Date</h4>
+                    <p className="text-slate-900">
+                      {formattedDate(new Date(viewingComplaint.created_date), "MMM d, yyyy, p")}
+                    </p>
+                  </div>
+
+                  <div className="bg-white border border-slate-200 rounded-xl p-4">
+                    <h4 className="text-sm font-semibold text-slate-700 mb-2">Last Updated</h4>
+                    <p className="text-slate-900">
+                      {formattedDate(new Date(viewingComplaint.updated_date || viewingComplaint.created_date), "MMM d, yyyy, p")}
+                    </p>
+                  </div>
+                </div>
+
+                {viewingComplaint.resolution_notes && (
+                  <div className="bg-green-50 border border-green-200 rounded-xl p-6">
+                    <h4 className="text-sm font-semibold text-green-900 mb-2">Resolution Notes</h4>
+                    <p className="text-green-800">{viewingComplaint.resolution_notes}</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Modal Actions */}
+              <div className="flex justify-end gap-3 pt-6 mt-6 border-t border-slate-200">
+                <button
+                  onClick={() => {
+                    setIsViewModalOpen(false);
+                    setViewingComplaint(null);
+                  }}
+                  className="px-6 py-3 text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl font-semibold transition-colors"
+                >
+                  Close
+                </button>
+                <button
+                  onClick={() => {
+                    setIsViewModalOpen(false);
+                    setViewingComplaint(null);
+                    handleEditComplaint(viewingComplaint);
+                  }}
+                  className="px-6 py-3 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white rounded-xl font-semibold transition-all duration-200 flex items-center gap-2 shadow-lg shadow-blue-500/30"
+                >
+                  <Edit className="w-5 h-5" />
+                  Edit Complaint
                 </button>
               </div>
             </div>

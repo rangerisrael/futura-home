@@ -15,7 +15,7 @@ import { toast } from 'react-toastify';
 
 export default function ClientAccountPage() {
   const router = useRouter();
-  const { user, profile, isAuthenticated, logout, updateProfile } = useClientAuth();
+  const { user, profile, isAuthenticated, logout, updateProfile, loading: authLoading } = useClientAuth();
   const [loading, setLoading] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -32,13 +32,21 @@ export default function ClientAccountPage() {
   });
 
   useEffect(() => {
-    if (!isAuthenticated) {
+    // Wait for auth to initialize - don't redirect while still loading
+    if (authLoading) return;
+
+    // Only redirect if auth is done loading and user is not authenticated
+    if (!authLoading && !isAuthenticated) {
       toast.error('Please login to access account settings');
       router.push('/client-login');
       return;
     }
-    loadUserData();
-  }, [isAuthenticated, user, profile]);
+
+    // Only load user data if authenticated
+    if (isAuthenticated) {
+      loadUserData();
+    }
+  }, [isAuthenticated, user, profile, authLoading]);
 
   const loadUserData = () => {
     if (!user || !profile) {

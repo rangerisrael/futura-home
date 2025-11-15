@@ -27,10 +27,19 @@ export async function POST(request) {
       );
     }
 
-    // Get the payment schedule details
+    // Get the payment schedule details with contract info
     const { data: schedule, error: scheduleError } = await supabaseAdmin
       .from("contract_payment_schedules")
-      .select("*")
+      .select(`
+        *,
+        contract:property_contracts(
+          contract_id,
+          contract_number,
+          downpayment_total,
+          remaining_downpayment,
+          remaining_balance
+        )
+      `)
       .eq("schedule_id", schedule_id)
       .single();
 
@@ -57,6 +66,7 @@ export async function POST(request) {
       schedule_id: schedule.schedule_id,
       current_status: schedule.payment_status,
       paid_amount: schedule.paid_amount,
+      penalty_amount: schedule.penalty_amount,
       remaining_amount: schedule.remaining_amount,
     });
 
@@ -81,13 +91,15 @@ export async function POST(request) {
     const newRemainingAmount = schedule.scheduled_amount;
     const newPaidAmount = 0;
 
-    // Update payment schedule to pending
+    // Update payment schedule to pending and reset penalty
     const { error: updateScheduleError } = await supabaseAdmin
       .from("contract_payment_schedules")
       .update({
         payment_status: "pending",
         paid_amount: newPaidAmount,
         remaining_amount: newRemainingAmount,
+        penalty_amount: 0, // Reset penalty when reverting
+        paid_date: null, // Clear paid date
         updated_at: new Date().toISOString(),
       })
       .eq("schedule_id", schedule_id);
@@ -138,7 +150,7 @@ export async function POST(request) {
         "⚠️ Warning: Failed to fetch schedules:",
         allSchedulesError
       );
-    } else {
+    } else if (schedule.contract) {
       const totalPaid = allSchedules.reduce(
         (sum, s) => sum + (parseFloat(s.paid_amount) || 0),
         0
@@ -148,7 +160,7 @@ export async function POST(request) {
 
       // Update contract remaining balance
       const { error: updateContractError } = await supabaseAdmin
-        .from("contract_to_sell_tbl")
+        .from("property_contracts")
         .update({
           remaining_balance: newRemainingBalance,
           remaining_downpayment: newRemainingBalance,
@@ -162,15 +174,23 @@ export async function POST(request) {
           updateContractError
         );
       }
+    } else {
+      console.error("⚠️ Warning: Contract data not found in schedule");
     }
 
-    console.log("✅ Payment reverted successfully");
+    console.log("✅ Payment reverted successfully", {
+      paid_amount_reverted: schedule.paid_amount,
+      penalty_amount_reverted: schedule.penalty_amount,
+      transactions_reverted: transactions?.length || 0,
+    });
 
     return NextResponse.json({
       success: true,
       message: "Payment reverted to pending successfully",
       data: {
         schedule_id: schedule_id,
+        paid_amount_reverted: schedule.paid_amount,
+        penalty_amount_reverted: schedule.penalty_amount,
         transactions_reverted: transactions?.length || 0,
       },
     });

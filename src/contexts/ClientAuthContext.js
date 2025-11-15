@@ -6,7 +6,16 @@ import { toast } from 'react-toastify';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+  {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+      storageKey: 'futura-client-auth',
+      storage: typeof window !== 'undefined' ? window.localStorage : undefined,
+    },
+  }
 );
 
 const ClientAuthContext = createContext();
@@ -24,13 +33,43 @@ export const ClientAuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Check current session
-    checkUser();
+    // Check current session and listen for auth changes
+    const initializeAuth = async () => {
+      try {
+        // Get initial session
+        const { data: { session }, error } = await supabase.auth.getSession();
+
+        if (error) {
+          console.error('Error getting session:', error);
+          setUser(null);
+        } else if (session?.user) {
+          setUser(session.user);
+          console.log('Session restored:', session.user.email);
+        } else {
+          setUser(null);
+        }
+      } catch (error) {
+        console.error('Error initializing auth:', error);
+        setUser(null);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    initializeAuth();
 
     // Listen for auth changes
     const { data: authListener } = supabase.auth.onAuthStateChange(
       async (event, session) => {
-        if (session?.user) {
+        console.log('Auth state changed:', event, session?.user?.email);
+
+        if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+          if (session?.user) {
+            setUser(session.user);
+          }
+        } else if (event === 'SIGNED_OUT') {
+          setUser(null);
+        } else if (session?.user) {
           setUser(session.user);
         } else {
           setUser(null);
@@ -43,19 +82,6 @@ export const ClientAuthProvider = ({ children }) => {
       authListener?.subscription?.unsubscribe();
     };
   }, []);
-
-  const checkUser = async () => {
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user) {
-        setUser(session.user);
-      }
-    } catch (error) {
-      console.error('Error checking user:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const signup = async (firstName, lastName, email, password, phone = '', address = '') => {
     try {

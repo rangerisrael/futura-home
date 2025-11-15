@@ -87,6 +87,7 @@ export default function Properties() {
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
+  const [blockFilter, setBlockFilter] = useState("all");
   const [viewMode, setViewMode] = useState("grid");
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -101,6 +102,7 @@ export default function Properties() {
   // Dropdown data
   const [propertyTypes, setPropertyTypes] = useState([]);
   const [lotNumbers, setLotNumbers] = useState([]);
+  const [blocks, setBlocks] = useState([]);
 
   // Common amenities list
   const commonAmenities = [
@@ -141,6 +143,7 @@ export default function Properties() {
     property_title: "",
     property_price: 1000000,
     property_downprice: 20000,
+    property_block: "",
     property_lot_id: "",
     property_details_id: "",
     property_availability: "vacant",
@@ -152,11 +155,12 @@ export default function Properties() {
     loadProperties();
     loadPropertyTypes();
     loadLotNumbers();
+    loadBlocks();
   }, []);
 
   useEffect(() => {
     filterProperties();
-  }, [properties, searchTerm, statusFilter, typeFilter]);
+  }, [properties, searchTerm, statusFilter, typeFilter, blockFilter]);
 
   // Load all properties from Supabase
   const loadProperties = async () => {
@@ -176,7 +180,8 @@ export default function Properties() {
           ),
           lot_tbl!property_lot_id(
             lot_id,
-            lot_number
+            lot_number,
+            property_block
           )
         `
         )
@@ -187,9 +192,33 @@ export default function Properties() {
         return;
       }
 
-      console.log("Properties loaded:", propertiesData);
+      // Get all contracts to check which properties have contracts
+      const { data: contractsData, error: contractsError } = await supabase
+        .from("property_contracts")
+        .select("property_id");
 
-      setProperties(propertiesData || []);
+      if (contractsError) {
+        console.error("Error loading contracts:", contractsError);
+      }
+
+      // Create a Set of property IDs that have contracts
+      const propertiesWithContracts = new Set(
+        contractsData?.map(c => c.property_id) || []
+      );
+
+      // Map properties with contract status
+      const propertiesWithContractStatus = propertiesData.map(property => ({
+        ...property,
+        hasContract: propertiesWithContracts.has(property.property_id),
+        // Override availability if has contract
+        displayAvailability: propertiesWithContracts.has(property.property_id)
+          ? "occupied"
+          : property.property_availability
+      }));
+
+      console.log("Properties loaded:", propertiesWithContractStatus);
+
+      setProperties(propertiesWithContractStatus || []);
     } catch (error) {
       console.error("Error loading properties:", error);
     } finally {
@@ -240,10 +269,10 @@ export default function Properties() {
   // Load lot numbers from lot_tbl
   const loadLotNumbers = async () => {
     try {
-      // Get all lots
+      // Get all lots with property_type_id
       const { data: lots, error: lotsError } = await supabase
         .from("lot_tbl")
-        .select("lot_id, lot_number, is_occupied")
+        .select("lot_id, lot_number, is_occupied, property_type_id")
         .order("lot_number", { ascending: true });
 
       if (lotsError) {
@@ -274,6 +303,65 @@ export default function Properties() {
     }
   };
 
+  // Load unique blocks from lot_tbl
+  const loadBlocks = async () => {
+    try {
+      const { data: lots, error } = await supabase
+        .from("lot_tbl")
+        .select("property_block")
+        .not("property_block", "is", null)
+        .order("property_block", { ascending: true });
+
+      if (error) {
+        console.error("Error loading blocks:", error);
+        return;
+      }
+
+      // Get unique blocks
+      const uniqueBlocks = [...new Set(lots.map((lot) => lot.property_block))];
+      setBlocks(uniqueBlocks);
+    } catch (error) {
+      console.error("Error loading blocks:", error);
+    }
+  };
+
+  // Get available lot numbers based on selected property detail
+  const getAvailableLots = (selectedPropertyDetailId, currentLotId = null) => {
+    console.log("🔍 Filtering lots:", {
+      selectedPropertyDetailId,
+      totalLots: lotNumbers.length,
+      lotsWithPropertyType: lotNumbers.filter((l) => l.property_type_id).length,
+    });
+
+    const filtered = lotNumbers.filter((lot) => {
+      // When editing, always include the current lot
+      const isCurrentLot = currentLotId && lot.lot_id === currentLotId;
+
+      // If no property detail selected, show all available lots
+      if (!selectedPropertyDetailId) {
+        return !lot.is_occupied || isCurrentLot;
+      }
+
+      // Show only lots that match the property type AND are available
+      const matchesPropertyType =
+        lot.property_type_id === selectedPropertyDetailId;
+      const isAvailable = !lot.is_occupied || isCurrentLot;
+
+      console.log(`Lot ${lot.lot_number}:`, {
+        property_type_id: lot.property_type_id,
+        selectedPropertyDetailId,
+        matchesPropertyType,
+        isAvailable,
+        included: matchesPropertyType && isAvailable,
+      });
+
+      return matchesPropertyType && isAvailable;
+    });
+
+    console.log("✅ Filtered lots:", filtered.length);
+    return filtered;
+  };
+
   // Filter properties based on search and filters
   const filterProperties = async () => {
     let filtered = properties;
@@ -300,6 +388,12 @@ export default function Properties() {
     if (typeFilter !== "all") {
       filtered = filtered.filter(
         (property) => property.property_details_id === typeFilter
+      );
+    }
+
+    if (blockFilter !== "all") {
+      filtered = filtered.filter(
+        (property) => property.lot_tbl?.property_block?.toString() === blockFilter.toString()
       );
     }
 
@@ -388,6 +482,9 @@ export default function Properties() {
   const resetForm = () => {
     setFormData({
       property_title: "",
+      property_price: 1000000,
+      property_downprice: 20000,
+      property_block: "",
       property_lot_id: "",
       property_details_id: "",
       property_availability: "vacant",
@@ -472,12 +569,13 @@ export default function Properties() {
     setEditingProperty(property);
     setFormData({
       property_title: property.property_title || "",
-      property_lot_id: property.property_lot_id || "",
       property_price:
         Number(property.property_price) > 0
           ? Number(property.property_price)
           : 1000000,
       property_downprice: Number(property.property_downprice),
+      property_block: property.property_block || "",
+      property_lot_id: property.property_lot_id || "",
       property_details_id: property.property_details_id || "",
       property_availability: property.property_availability || "vacant",
       amenities: Array.isArray(property.amenities) ? property.amenities : [],
@@ -563,6 +661,7 @@ export default function Properties() {
       // Validate required fields
       if (
         !formData.property_title.trim() ||
+        !formData.property_block ||
         !formData.property_lot_id ||
         !formData.property_details_id
       ) {
@@ -623,6 +722,7 @@ export default function Properties() {
       // Prepare data for insert/update
       const propertyData = {
         property_title: formData.property_title.trim(),
+        property_block: formData.property_block || null,
         property_lot_id: formData.property_lot_id || null,
         property_price: formData.property_price,
         property_downprice: formData.property_downprice,
@@ -1038,7 +1138,7 @@ export default function Properties() {
                   <p className="text-3xl font-bold text-emerald-600">
                     {
                       properties.filter(
-                        (p) => p.property_availability === "occupied"
+                        (p) => (p.displayAvailability || p.property_availability) === "occupied"
                       ).length
                     }
                   </p>
@@ -1063,7 +1163,7 @@ export default function Properties() {
                   <p className="text-3xl font-bold text-rose-600">
                     {
                       properties.filter(
-                        (p) => p.property_availability === "vacant"
+                        (p) => (p.displayAvailability || p.property_availability) === "vacant" && !p.hasContract
                       ).length
                     }
                   </p>
@@ -1142,6 +1242,20 @@ export default function Properties() {
                   {propertyTypes.map((type) => (
                     <SelectItem key={type.detail_id} value={type.detail_id}>
                       {type.property_name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <Select value={blockFilter} onValueChange={setBlockFilter}>
+                <SelectTrigger className="w-48 bg-white border-2 border-slate-200 hover:border-slate-300 py-6 rounded-xl shadow-sm transition-all duration-200">
+                  <SelectValue placeholder="All Blocks" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Blocks</SelectItem>
+                  {blocks.map((block) => (
+                    <SelectItem key={block} value={block.toString()}>
+                      Block {block}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -1228,6 +1342,7 @@ export default function Properties() {
                   setSearchTerm("");
                   setStatusFilter("all");
                   setTypeFilter("all");
+                  setBlockFilter("all");
                 }}
                 className="bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white shadow-lg"
               >
@@ -1269,10 +1384,10 @@ export default function Properties() {
                         <div className="absolute top-3 right-3 flex gap-2 pointer-events-none">
                           <Badge
                             className={`${getStatusColor(
-                              property.property_availability
+                              property.displayAvailability || property.property_availability
                             )} border-0 font-semibold capitalize shadow-lg backdrop-blur-sm`}
                           >
-                            {property.property_availability?.replace(
+                            {(property.displayAvailability || property.property_availability)?.replace(
                               "_",
                               " "
                             ) || "N/A"}
@@ -1281,6 +1396,11 @@ export default function Properties() {
                             <Badge className="bg-gradient-to-r from-emerald-500 to-emerald-600 text-white border-0 shadow-lg animate-pulse">
                               <Sparkles className="w-3 h-3 mr-1" />
                               New
+                            </Badge>
+                          )}
+                          {property.hasContract && (
+                            <Badge className="bg-gradient-to-r from-purple-500 to-purple-600 text-white border-0 shadow-lg">
+                              📄 Contract
                             </Badge>
                           )}
                         </div>
@@ -1292,6 +1412,7 @@ export default function Properties() {
                           </h3>
                           <p className="text-white/90 text-sm flex items-center gap-1">
                             <MapPin className="w-3 h-3" />
+                            {property.lot_tbl?.property_block && `Block ${property.lot_tbl.property_block} - `}
                             Lot {property.lot_tbl?.lot_number || "N/A"}
                           </p>
                         </div>
@@ -1308,10 +1429,10 @@ export default function Properties() {
                         <div className="absolute top-3 right-3 flex gap-2">
                           <Badge
                             className={`${getStatusColor(
-                              property.property_availability
+                              property.displayAvailability || property.property_availability
                             )} border-0 font-semibold capitalize shadow-lg`}
                           >
-                            {property.property_availability?.replace(
+                            {(property.displayAvailability || property.property_availability)?.replace(
                               "_",
                               " "
                             ) || "N/A"}
@@ -1320,6 +1441,11 @@ export default function Properties() {
                             <Badge className="bg-gradient-to-r from-emerald-500 to-emerald-600 text-white border-0 shadow-lg animate-pulse">
                               <Sparkles className="w-3 h-3 mr-1" />
                               New
+                            </Badge>
+                          )}
+                          {property.hasContract && (
+                            <Badge className="bg-gradient-to-r from-purple-500 to-purple-600 text-white border-0 shadow-lg">
+                              📄 Contract
                             </Badge>
                           )}
                         </div>
@@ -1335,6 +1461,7 @@ export default function Properties() {
                           </CardTitle>
                           <p className="text-sm text-slate-600 flex items-center gap-1">
                             <MapPin className="w-3 h-3" />
+                            {property.lot_tbl?.property_block && `Block ${property.lot_tbl.property_block} - `}
                             Lot {property.lot_tbl?.lot_number || "N/A"}
                           </p>
                         </div>
@@ -1463,7 +1590,10 @@ export default function Properties() {
                               Property Price
                             </p>
                             <p className="text-3xl font-black text-red-600">
-                              ₱{(property.property_price || 0).toLocaleString("en-PH")}
+                              ₱
+                              {(property?.property_price || 0).toLocaleString(
+                                "en-PH"
+                              )}
                             </p>
                           </div>
 
@@ -1477,12 +1607,20 @@ export default function Properties() {
                                 Reservation Fee
                               </p>
                               <p className="text-xl font-bold text-emerald-700">
-                                ₱{(property.property_downprice || 0).toLocaleString("en-PH")}
+                                ₱
+                                {(
+                                  property?.property_downprice || 0
+                                ).toLocaleString("en-PH")}
                               </p>
                             </div>
                             <Badge className="bg-gradient-to-r from-emerald-500 to-emerald-600 text-white border-0 shadow-md">
-                              {property.property_downprice && property.property_price
-                                ? `${((property.property_downprice / property.property_price) * 100).toFixed(1)}%`
+                              {property.property_downprice &&
+                              property.property_price
+                                ? `${(
+                                    (property.property_downprice /
+                                      property.property_price) *
+                                    100
+                                  ).toFixed(1)}%`
                                 : "0%"}
                             </Badge>
                           </div>
@@ -1583,24 +1721,64 @@ export default function Properties() {
                         />
                       </div>
 
-                      {/* Reservation Fee */}
+                      {/* Property Price */}
                       <div className="space-y-2">
                         <label className="text-sm font-medium text-slate-700">
                           Property Price <span className="text-red-500">*</span>
                         </label>
                         <input
-                          type="range"
+                          type="number"
                           name="property_price"
                           value={formData.property_price}
                           onChange={handleInputChange}
+                          onBlur={(e) => {
+                            const value = Number(e.target.value);
+                            if (value && value < 1000000) {
+                              toast.error(
+                                "Property price must be at least ₱1,000,000"
+                              );
+                            } else if (value > 1000000000) {
+                              toast.error(
+                                "Property price cannot exceed ₱1,000,000,000"
+                              );
+                            }
+                          }}
                           className="w-full px-4 py-3 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-                          placeholder="Enter property price"
+                          placeholder="Enter property price (min: ₱1,000,000)"
                           min="1000000"
                           max="1000000000"
                           step="500"
+                          required
+                        />
+                        {formData.property_price < 1000000 &&
+                          formData.property_price > 0 && (
+                            <p className="text-xs text-red-600 font-medium">
+                              ⚠ Minimum price is ₱1,000,000
+                            </p>
+                          )}
+                        {formData.property_price > 1000000000 && (
+                          <p className="text-xs text-red-600 font-medium">
+                            ⚠ Maximum price is ₱1,000,000,000
+                          </p>
+                        )}
+                        <input
+                          type="range"
+                          name="property_price"
+                          value={Math.min(
+                            Math.max(formData.property_price, 1000000),
+                            1000000000
+                          )}
+                          className="w-full"
+                          min="1000000"
+                          max="1000000000"
+                          step="500"
+                          disabled
                         />
                         <span className="text-base font-semibold text-blue-600">
-                          ₱{formData.property_price.toLocaleString("en-PH")}
+                          ₱
+                          {(formData.property_price || 0).toLocaleString(
+                            "en-PH"
+                          )}
                         </span>
                       </div>
 
@@ -1663,74 +1841,44 @@ export default function Properties() {
                         </div>
                       </div>
 
-                      {/* Lot and Property Details */}
+                      {/* Block Selection */}
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium text-slate-700">
+                          Block
+                        </label>
+                        <ReactSelect
+                          options={blocks.map((block) => ({
+                            value: block,
+                            label: `Block ${block}`,
+                          }))}
+                          value={
+                            formData.property_block
+                              ? {
+                                  value: formData.property_block,
+                                  label: `Block ${formData.property_block}`,
+                                }
+                              : null
+                          }
+                          onChange={(option) => {
+                            handleSelectChange(
+                              "property_block",
+                              option?.value || ""
+                            );
+                          }}
+                          styles={customSelectStyles}
+                          menuPortalTarget={
+                            typeof document !== "undefined"
+                              ? document.body
+                              : null
+                          }
+                          placeholder="Select Block"
+                          isClearable
+                          required
+                        />
+                      </div>
+
+                      {/* Property Details and Lot Number */}
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                          <label className="text-sm font-medium text-slate-700">
-                            Lot Number <span className="text-red-500">*</span>
-                          </label>
-                          <ReactSelect
-                            options={[
-                              ...lotNumbers.map((lot) => {
-                                // When editing, allow the current lot even if marked occupied
-                                const isCurrentLot =
-                                  editingProperty &&
-                                  editingProperty.property_lot_id ===
-                                    lot.lot_id;
-                                const shouldDisable =
-                                  lot.is_occupied && !isCurrentLot;
-
-                                return {
-                                  value: lot.lot_id,
-                                  label: `${lot.lot_number}${
-                                    shouldDisable ? " (Occupied)" : ""
-                                  }${isCurrentLot ? " (Current)" : ""}`,
-                                  isDisabled: shouldDisable,
-                                };
-                              }),
-                              {
-                                value: "__create_new__",
-                                label: "➕ Create New Lot",
-                                className: "font-semibold text-blue-600",
-                              },
-                            ]}
-                            value={
-                              formData.property_lot_id
-                                ? lotNumbers.find(
-                                    (l) => l.lot_id === formData.property_lot_id
-                                  )
-                                  ? {
-                                      value: formData.property_lot_id,
-                                      label: lotNumbers.find(
-                                        (l) =>
-                                          l.lot_id === formData.property_lot_id
-                                      ).lot_number,
-                                    }
-                                  : null
-                                : null
-                            }
-                            onChange={(option) => {
-                              if (option?.value === "__create_new__") {
-                                router.push("/properties/lot");
-                              } else {
-                                handleSelectChange(
-                                  "property_lot_id",
-                                  option?.value || ""
-                                );
-                              }
-                            }}
-                            styles={customSelectStyles}
-                            menuPortalTarget={
-                              typeof document !== "undefined"
-                                ? document.body
-                                : null
-                            }
-                            placeholder="Select Lot Number"
-                            isClearable
-                            required
-                          />
-                        </div>
-
                         <div className="space-y-2">
                           <label className="text-sm font-medium text-slate-700">
                             Property Details{" "}
@@ -1738,28 +1886,18 @@ export default function Properties() {
                           </label>
                           <ReactSelect
                             options={[
-                              ...propertyTypes
-                                .filter((type) => {
-                                  // When editing, show the current property detail even if used
-                                  const isCurrentDetail =
-                                    editingProperty &&
-                                    editingProperty.property_details_id ===
-                                      type.detail_id;
-                                  // Only show unused property details or the current one
-                                  return !type.is_used || isCurrentDetail;
-                                })
-                                .map((type) => {
-                                  const isCurrentDetail =
-                                    editingProperty &&
-                                    editingProperty.property_details_id ===
-                                      type.detail_id;
-                                  return {
-                                    value: type.detail_id,
-                                    label: `${type.property_name}${
-                                      isCurrentDetail ? " (Current)" : ""
-                                    }`,
-                                  };
-                                }),
+                              ...propertyTypes.map((type) => {
+                                const isCurrentDetail =
+                                  editingProperty &&
+                                  editingProperty.property_details_id ===
+                                    type.detail_id;
+                                return {
+                                  value: type.detail_id,
+                                  label: `${type.property_name}${
+                                    isCurrentDetail ? " (Current)" : ""
+                                  }`,
+                                };
+                              }),
                               {
                                 value: "__create_new__",
                                 label: "➕ Create New Property Type",
@@ -1804,6 +1942,90 @@ export default function Properties() {
                             isClearable
                             required
                           />
+                        </div>
+
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium text-slate-700">
+                            Lot Number <span className="text-red-500">*</span>
+                          </label>
+                          <ReactSelect
+                            options={[
+                              ...getAvailableLots(
+                                formData.property_details_id,
+                                editingProperty?.property_lot_id
+                              ).map((lot) => {
+                                const isCurrentLot =
+                                  editingProperty &&
+                                  editingProperty.property_lot_id ===
+                                    lot.lot_id;
+
+                                return {
+                                  value: lot.lot_id,
+                                  label: `${lot.lot_number}${
+                                    isCurrentLot ? " (Current)" : ""
+                                  }`,
+                                };
+                              }),
+                              {
+                                value: "__create_new__",
+                                label: "➕ Create New Lot",
+                                className: "font-semibold text-blue-600",
+                              },
+                            ]}
+                            value={
+                              formData.property_lot_id
+                                ? lotNumbers.find(
+                                    (l) => l.lot_id === formData.property_lot_id
+                                  )
+                                  ? {
+                                      value: formData.property_lot_id,
+                                      label: lotNumbers.find(
+                                        (l) =>
+                                          l.lot_id === formData.property_lot_id
+                                      ).lot_number,
+                                    }
+                                  : null
+                                : null
+                            }
+                            onChange={(option) => {
+                              if (option?.value === "__create_new__") {
+                                router.push("/properties/lot");
+                              } else {
+                                handleSelectChange(
+                                  "property_lot_id",
+                                  option?.value || ""
+                                );
+                              }
+                            }}
+                            styles={customSelectStyles}
+                            menuPortalTarget={
+                              typeof document !== "undefined"
+                                ? document.body
+                                : null
+                            }
+                            placeholder={
+                              formData.property_details_id
+                                ? "Select Available Lot"
+                                : "Select Property Details First"
+                            }
+                            isClearable
+                            required
+                            isDisabled={!formData.property_details_id}
+                            noOptionsMessage={() =>
+                              formData.property_details_id
+                                ? "No available lots for this property type"
+                                : "Please select a property detail first"
+                            }
+                          />
+                          {formData.property_details_id &&
+                            getAvailableLots(formData.property_details_id)
+                              .length === 0 && (
+                              <p className="text-xs text-amber-600 font-medium flex items-center gap-1">
+                                <AlertTriangle className="w-3 h-3" />
+                                No available lots. Create a new lot with this
+                                property type.
+                              </p>
+                            )}
                         </div>
                       </div>
 
@@ -2084,25 +2306,64 @@ export default function Properties() {
                         />
                       </div>
 
-                      {/* Reservation Fee */}
+                      {/* Property Price */}
                       <div className="space-y-2">
                         <label className="text-sm font-medium text-slate-700">
                           Property Price <span className="text-red-500">*</span>
                         </label>
                         <input
-                          type="range"
+                          type="number"
                           name="property_price"
                           value={formData.property_price}
                           onChange={handleInputChange}
+                          onBlur={(e) => {
+                            const value = Number(e.target.value);
+                            if (value && value < 1000000) {
+                              toast.error(
+                                "Property price must be at least ₱1,000,000"
+                              );
+                            } else if (value > 1000000000) {
+                              toast.error(
+                                "Property price cannot exceed ₱1,000,000,000"
+                              );
+                            }
+                          }}
                           className="w-full px-4 py-3 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-                          placeholder="Enter property price"
+                          placeholder="Enter property price (min: ₱1,000,000)"
                           min="1000000"
                           max="1000000000"
                           step="500"
+                          required
+                        />
+                        {formData.property_price < 1000000 &&
+                          formData.property_price > 0 && (
+                            <p className="text-xs text-red-600 font-medium">
+                              ⚠ Minimum price is ₱1,000,000
+                            </p>
+                          )}
+                        {formData.property_price > 1000000000 && (
+                          <p className="text-xs text-red-600 font-medium">
+                            ⚠ Maximum price is ₱1,000,000,000
+                          </p>
+                        )}
+                        <input
+                          type="range"
+                          name="property_price"
+                          value={Math.min(
+                            Math.max(formData.property_price, 1000000),
+                            1000000000
+                          )}
+                          className="w-full"
+                          min="1000000"
+                          max="1000000000"
+                          step="500"
+                          disabled
                         />
                         <span className="text-base font-semibold text-blue-600">
-                          {formData.property_price}
-                          {/* ₱{formData.property_price.toLocaleString("en-PH")} */}
+                          ₱
+                          {(formData.property_price || 0).toLocaleString(
+                            "en-PH"
+                          )}
                         </span>
                       </div>
 
@@ -2165,74 +2426,44 @@ export default function Properties() {
                         </div>
                       </div>
 
-                      {/* Lot and Property Details */}
+                      {/* Block Selection */}
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium text-slate-700">
+                          Block
+                        </label>
+                        <ReactSelect
+                          options={blocks.map((block) => ({
+                            value: block,
+                            label: `Block ${block}`,
+                          }))}
+                          value={
+                            formData.property_block
+                              ? {
+                                  value: formData.property_block,
+                                  label: `Block ${formData.property_block}`,
+                                }
+                              : null
+                          }
+                          onChange={(option) => {
+                            handleSelectChange(
+                              "property_block",
+                              option?.value || ""
+                            );
+                          }}
+                          styles={customSelectStyles}
+                          menuPortalTarget={
+                            typeof document !== "undefined"
+                              ? document.body
+                              : null
+                          }
+                          placeholder="Select Block"
+                          isClearable
+                          required
+                        />
+                      </div>
+
+                      {/* Property Details and Lot Number */}
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                          <label className="text-sm font-medium text-slate-700">
-                            Lot Number <span className="text-red-500">*</span>
-                          </label>
-                          <ReactSelect
-                            options={[
-                              ...lotNumbers.map((lot) => {
-                                // When editing, allow the current lot even if marked occupied
-                                const isCurrentLot =
-                                  editingProperty &&
-                                  editingProperty.property_lot_id ===
-                                    lot.lot_id;
-                                const shouldDisable =
-                                  lot.is_occupied && !isCurrentLot;
-
-                                return {
-                                  value: lot.lot_id,
-                                  label: `${lot.lot_number}${
-                                    shouldDisable ? " (Occupied)" : ""
-                                  }${isCurrentLot ? " (Current)" : ""}`,
-                                  isDisabled: shouldDisable,
-                                };
-                              }),
-                              {
-                                value: "__create_new__",
-                                label: "➕ Create New Lot",
-                                className: "font-semibold text-blue-600",
-                              },
-                            ]}
-                            value={
-                              formData.property_lot_id
-                                ? lotNumbers.find(
-                                    (l) => l.lot_id === formData.property_lot_id
-                                  )
-                                  ? {
-                                      value: formData.property_lot_id,
-                                      label: lotNumbers.find(
-                                        (l) =>
-                                          l.lot_id === formData.property_lot_id
-                                      ).lot_number,
-                                    }
-                                  : null
-                                : null
-                            }
-                            onChange={(option) => {
-                              if (option?.value === "__create_new__") {
-                                router.push("/properties/lot");
-                              } else {
-                                handleSelectChange(
-                                  "property_lot_id",
-                                  option?.value || ""
-                                );
-                              }
-                            }}
-                            styles={customSelectStyles}
-                            menuPortalTarget={
-                              typeof document !== "undefined"
-                                ? document.body
-                                : null
-                            }
-                            placeholder="Select Lot Number"
-                            isClearable
-                            required
-                          />
-                        </div>
-
                         <div className="space-y-2">
                           <label className="text-sm font-medium text-slate-700">
                             Property Details{" "}
@@ -2240,28 +2471,18 @@ export default function Properties() {
                           </label>
                           <ReactSelect
                             options={[
-                              ...propertyTypes
-                                .filter((type) => {
-                                  // When editing, show the current property detail even if used
-                                  const isCurrentDetail =
-                                    editingProperty &&
-                                    editingProperty.property_details_id ===
-                                      type.detail_id;
-                                  // Only show unused property details or the current one
-                                  return !type.is_used || isCurrentDetail;
-                                })
-                                .map((type) => {
-                                  const isCurrentDetail =
-                                    editingProperty &&
-                                    editingProperty.property_details_id ===
-                                      type.detail_id;
-                                  return {
-                                    value: type.detail_id,
-                                    label: `${type.property_name}${
-                                      isCurrentDetail ? " (Current)" : ""
-                                    }`,
-                                  };
-                                }),
+                              ...propertyTypes.map((type) => {
+                                const isCurrentDetail =
+                                  editingProperty &&
+                                  editingProperty.property_details_id ===
+                                    type.detail_id;
+                                return {
+                                  value: type.detail_id,
+                                  label: `${type.property_name}${
+                                    isCurrentDetail ? " (Current)" : ""
+                                  }`,
+                                };
+                              }),
                               {
                                 value: "__create_new__",
                                 label: "➕ Create New Property Type",
@@ -2306,6 +2527,90 @@ export default function Properties() {
                             isClearable
                             required
                           />
+                        </div>
+
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium text-slate-700">
+                            Lot Number <span className="text-red-500">*</span>
+                          </label>
+                          <ReactSelect
+                            options={[
+                              ...getAvailableLots(
+                                formData.property_details_id,
+                                editingProperty?.property_lot_id
+                              ).map((lot) => {
+                                const isCurrentLot =
+                                  editingProperty &&
+                                  editingProperty.property_lot_id ===
+                                    lot.lot_id;
+
+                                return {
+                                  value: lot.lot_id,
+                                  label: `${lot.lot_number}${
+                                    isCurrentLot ? " (Current)" : ""
+                                  }`,
+                                };
+                              }),
+                              {
+                                value: "__create_new__",
+                                label: "➕ Create New Lot",
+                                className: "font-semibold text-blue-600",
+                              },
+                            ]}
+                            value={
+                              formData.property_lot_id
+                                ? lotNumbers.find(
+                                    (l) => l.lot_id === formData.property_lot_id
+                                  )
+                                  ? {
+                                      value: formData.property_lot_id,
+                                      label: lotNumbers.find(
+                                        (l) =>
+                                          l.lot_id === formData.property_lot_id
+                                      ).lot_number,
+                                    }
+                                  : null
+                                : null
+                            }
+                            onChange={(option) => {
+                              if (option?.value === "__create_new__") {
+                                router.push("/properties/lot");
+                              } else {
+                                handleSelectChange(
+                                  "property_lot_id",
+                                  option?.value || ""
+                                );
+                              }
+                            }}
+                            styles={customSelectStyles}
+                            menuPortalTarget={
+                              typeof document !== "undefined"
+                                ? document.body
+                                : null
+                            }
+                            placeholder={
+                              formData.property_details_id
+                                ? "Select Available Lot"
+                                : "Select Property Details First"
+                            }
+                            isClearable
+                            required
+                            isDisabled={!formData.property_details_id}
+                            noOptionsMessage={() =>
+                              formData.property_details_id
+                                ? "No available lots for this property type"
+                                : "Please select a property detail first"
+                            }
+                          />
+                          {formData.property_details_id &&
+                            getAvailableLots(formData.property_details_id)
+                              .length === 0 && (
+                              <p className="text-xs text-amber-600 font-medium flex items-center gap-1">
+                                <AlertTriangle className="w-3 h-3" />
+                                No available lots. Create a new lot with this
+                                property type.
+                              </p>
+                            )}
                         </div>
                       </div>
 

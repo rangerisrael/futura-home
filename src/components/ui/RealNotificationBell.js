@@ -108,7 +108,10 @@ const RealNotificationBell = () => {
     }
 
     // Get the action URL from notification data
-    const actionUrl = notification.data?.action_url || notification.action_url;
+    const actionUrl = notification.action_url ?? notification.data?.action_url;
+
+    console.log(notification, "get url action");
+    console.log(actionUrl, "get url action");
 
     if (actionUrl) {
       setIsOpen(false); // Close the dropdown
@@ -408,7 +411,9 @@ const RealNotificationBell = () => {
                                     </p>
                                     {notification.action && (
                                       <button
-                                        onClick={(e) => handleViewDetails(e, notification)}
+                                        onClick={(e) =>
+                                          handleViewDetails(e, notification)
+                                        }
                                         className="text-xs text-blue-600 hover:text-blue-800 font-medium transition-colors hover:underline"
                                       >
                                         {notification.action} →

@@ -98,7 +98,7 @@ export async function POST(request) {
               <div class="contact-info">
                 <h4 style="margin-top: 0; color: #f59e0b;">📞 Need More Information?</h4>
                 <p style="margin: 5px 0;">Feel free to reply to this email or contact us:</p>
-                <p style="margin: 5px 0;"><strong>Phone:</strong> +63 XXX XXX XXXX</p>
+                <p style="margin: 5px 0;"><strong>Phone:</strong> +639676484028</p>
                 <p style="margin: 5px 0;"><strong>Email:</strong> info@futurahomes.com</p>
               </div>
 

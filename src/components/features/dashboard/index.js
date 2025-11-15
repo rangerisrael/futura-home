@@ -122,15 +122,15 @@ export default function Dashboard() {
     try {
       console.log("Loading dashboard data from Supabase...");
 
-      // Fetch properties
+      // Fetch properties from property_info_tbl
       const propertiesResult = await supabase
         .from("property_info_tbl")
-        .select("*");
+        .select("property_id, property_availability");
 
-      // Fetch contracts
+      // Fetch contracts with property info
       const contractsResult = await supabase
         .from("property_contracts")
-        .select("*");
+        .select("*, property_id");
 
       // Fetch recent transactions (last 30 days)
       const thirtyDaysAgo = new Date();
@@ -173,16 +173,46 @@ export default function Dashboard() {
         announcements: announcements.length,
       });
 
-      // Calculate property stats
-      const availableProperties = properties.filter(
-        (p) => p.status === "available"
-      ).length;
-      const reservedProperties = properties.filter(
-        (p) => p.status === "reserved"
-      ).length;
+      // Create a Set of property IDs that have contracts
+      const propertiesWithContracts = new Set(
+        contracts.map(c => c.property_id)
+      );
+
+      // Calculate property stats based on property_availability field AND contracts
+      // Sold = properties with "occupied" status OR properties that have contracts
       const soldProperties = properties.filter(
-        (p) => p.status === "sold"
+        (p) => p.property_availability?.toLowerCase() === "occupied" || propertiesWithContracts.has(p.property_id)
       ).length;
+
+      // Reserved = properties with "reserved" status (but not if they have a contract)
+      // Handle both "Reserved" (uppercase) and "reserved" (lowercase)
+      const reservedProperties = properties.filter(
+        (p) => p.property_availability?.toLowerCase() === "reserved" && !propertiesWithContracts.has(p.property_id)
+      ).length;
+
+      // Available = "for_sale" + "vacant" (but not if they have a contract)
+      const availableProperties = properties.filter(
+        (p) => {
+          const avail = p.property_availability?.toLowerCase();
+          return (avail === "for_sale" || avail === "vacant") && !propertiesWithContracts.has(p.property_id);
+        }
+      ).length;
+
+      console.log("Property Stats:", {
+        total: properties.length,
+        available: availableProperties,
+        reserved: reservedProperties,
+        sold: soldProperties,
+        contractsCount: contracts.length,
+        propertiesWithContracts: propertiesWithContracts.size,
+        availabilityBreakdown: {
+          "for_sale": properties.filter((p) => p.property_availability?.toLowerCase() === "for_sale").length,
+          "vacant": properties.filter((p) => p.property_availability?.toLowerCase() === "vacant").length,
+          "reserved": properties.filter((p) => p.property_availability?.toLowerCase() === "reserved").length,
+          "occupied": properties.filter((p) => p.property_availability?.toLowerCase() === "occupied").length,
+          "under_construction": properties.filter((p) => p.property_availability?.toLowerCase() === "under_construction").length,
+        },
+      });
 
       setPropertyStats({
         available: availableProperties,

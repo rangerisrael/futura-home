@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Building2, Mail, Lock, ArrowLeft } from 'lucide-react';
+import { Building2, Mail, Lock, ArrowLeft, Eye, EyeOff } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useClientAuth, ClientAuthProvider } from '@/contexts/ClientAuthContext';
 import Link from 'next/link';
@@ -17,8 +17,11 @@ function ClientLoginPageContent() {
     email: '',
     password: ''
   });
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState({});
+  const [rateLimitError, setRateLimitError] = useState(false);
+  const [cooldown, setCooldown] = useState(0);
 
   const validateForm = () => {
     const newErrors = {};
@@ -42,9 +45,36 @@ function ClientLoginPageContent() {
 
     if (!validateForm()) return;
 
+    // Check if in cooldown
+    if (cooldown > 0) {
+      return;
+    }
+
     setLoading(true);
+    setRateLimitError(false);
+
     const { data, error } = await login(formData.email, formData.password);
     setLoading(false);
+
+    // Check for rate limit error
+    if (error && error.includes('rate limit')) {
+      setRateLimitError(true);
+      setCooldown(30); // 30 second cooldown
+
+      // Countdown
+      const interval = setInterval(() => {
+        setCooldown(prev => {
+          if (prev <= 1) {
+            clearInterval(interval);
+            setRateLimitError(false);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+
+      return;
+    }
 
     if (!error && data) {
       // Check if there's a redirect URL in session storage
@@ -85,6 +115,18 @@ function ClientLoginPageContent() {
             <CardTitle>Log In</CardTitle>
           </CardHeader>
           <CardContent>
+            {rateLimitError && (
+              <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-4">
+                <div className="flex">
+                  <div className="ml-3">
+                    <p className="text-sm text-yellow-700">
+                      <strong>Too many attempts.</strong> Please wait {cooldown} seconds before trying again.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
             <form onSubmit={handleSubmit} className="space-y-4">
               {/* Email */}
               <div>
@@ -108,18 +150,38 @@ function ClientLoginPageContent() {
 
               {/* Password */}
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">
-                  Password
-                </label>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-sm font-medium text-slate-700">
+                    Password
+                  </label>
+                  <Link
+                    href="/client-forgot-password"
+                    className="text-xs sm:text-sm text-red-600 hover:text-red-700 font-semibold transition-colors"
+                  >
+                    Forgot password?
+                  </Link>
+                </div>
                 <div className="relative">
                   <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400 h-5 w-5" />
                   <Input
-                    type="password"
+                    type={showPassword ? "text" : "password"}
                     value={formData.password}
                     onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                    className="pl-10"
+                    className="pl-10 pr-10"
                     placeholder="Enter your password"
                   />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors focus:outline-none"
+                    tabIndex={-1}
+                  >
+                    {showPassword ? (
+                      <EyeOff className="w-5 h-5" />
+                    ) : (
+                      <Eye className="w-5 h-5" />
+                    )}
+                  </button>
                 </div>
                 {errors.password && (
                   <p className="text-red-600 text-sm mt-1">{errors.password}</p>
@@ -129,10 +191,14 @@ function ClientLoginPageContent() {
               {/* Submit Button */}
               <Button
                 type="submit"
-                disabled={loading || authLoading}
+                disabled={loading || authLoading || cooldown > 0}
                 className="w-full bg-red-600 hover:bg-red-700 h-12 text-lg"
               >
-                {loading ? 'Logging In...' : 'Log In'}
+                {cooldown > 0
+                  ? `Please wait ${cooldown}s`
+                  : loading
+                    ? 'Logging In...'
+                    : 'Log In'}
               </Button>
             </form>
 
